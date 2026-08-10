@@ -136,8 +136,8 @@
 <div class="card">
   <h3 style="margin-top:0">Parts ({{ parts|length }})</h3>
   {% if parts %}
-  <table>
-    <thead><tr><th>Name</th><th>Part #</th><th>Supplier</th><th>Cost</th><th>Status</th><th>Added</th></tr></thead>
+  <table style="margin-bottom:1rem">
+    <thead><tr><th>Name</th><th>Part #</th><th>Supplier</th><th>Cost</th><th>Status</th><th>Added</th><th></th></tr></thead>
     <tbody>
     {% for p in parts %}
     <tr>
@@ -147,13 +147,44 @@
       <td>${{ "%.2f"|format(p.cost_cents/100) }}</td>
       <td><span class="badge badge-{{ p.status }}">{{ p.status }}</span></td>
       <td>{{ p.created_at[:10] }}</td>
+      <td>
+        <form method="post" action="/admin/parts/{{ p.id }}/status" style="display:flex;gap:.3rem">
+          <select name="status" style="font-size:.8rem;padding:.2rem">
+            {% for s in ['ordered','received','installed','returned'] %}
+            <option value="{{ s }}" {% if p.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-secondary" style="font-size:.75rem;padding:.2rem .5rem">Save</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p style="color:#999">No parts logged.</p>
+  <p style="color:#999;margin-bottom:1rem">No parts logged.</p>
   {% endif %}
+
+  <h4 style="margin:.5rem 0 .5rem">Add Part</h4>
+  <form method="post" action="/admin/jobs/{{ job.id }}/parts/add" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Name *</label>
+      <input name="name" type="text" required placeholder="e.g. Screen assembly" style="padding:.35rem;border:1px solid #ccc;border-radius:4px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Part #</label>
+      <input name="part_number" type="text" placeholder="optional" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:120px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Supplier</label>
+      <input name="supplier" type="text" placeholder="optional" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:120px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Cost (cents)</label>
+      <input name="cost_cents" type="number" value="0" min="0" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:90px">
+    </div>
+    <button type="submit" class="btn btn-primary">Add Part</button>
+  </form>
 </div>
 
 <!-- Status History -->

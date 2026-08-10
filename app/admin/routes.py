@@ -696,3 +696,151 @@ def customer_detail(customer_id: int):
         return jsonify(ctx)
 
     return render_template("admin/customer_detail.html", **ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Technician management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/technicians")
+@login_required
+def technician_list():
+    db = get_db()
+    technicians = db.execute(
+        """
+        SELECT t.*, COUNT(rj.id) AS active_jobs
+        FROM   technicians t
+        LEFT JOIN repair_jobs rj
+               ON rj.technician_id = t.id
+              AND rj.status NOT IN ('picked_up', 'cancelled', 'closed')
+        GROUP  BY t.id
+        ORDER  BY t.active DESC, t.name ASC
+        """
+    ).fetchall()
+    ctx = {"technicians": [dict(r) for r in technicians]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/technician_list.html", **ctx)
+
+
+@admin_bp.route("/technicians/new", methods=["POST"])
+@login_required
+def technician_new():
+    name  = (request.form.get("name")  or "").strip()
+    email = (request.form.get("email") or "").strip() or None
+    phone = (request.form.get("phone") or "").strip() or None
+
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("admin.technician_list"))
+
+    if phone:
+        try:
+            phone = _validate_phone(phone)
+        except ValueError as e:
+            flash(str(e), "error")
+            return redirect(url_for("admin.technician_list"))
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO technicians (name, email, phone) VALUES (?, ?, ?)",
+        (name, email, phone),
+    )
+    db.commit()
+    flash(f"Technician '{name}' added.", "success")
+    return redirect(url_for("admin.technician_list"))
+
+
+@admin_bp.route("/technicians/<int:tech_id>/toggle", methods=["POST"])
+@login_required
+def technician_toggle(tech_id: int):
+    db = get_db()
+    tech = db.execute("SELECT id, active, name FROM technicians WHERE id = ?", (tech_id,)).fetchone()
+    if not tech:
+        abort(404)
+    new_active = 0 if tech["active"] else 1
+    db.execute("UPDATE technicians SET active = ? WHERE id = ?", (new_active, tech_id))
+    db.commit()
+    state = "activated" if new_active else "deactivated"
+    flash(f"Technician '{tech['name']}' {state}.", "success")
+    return redirect(url_for("admin.technician_list"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parts management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/jobs/<int:job_id>/parts/add", methods=["POST"])
+@login_required
+def part_add(job_id: int):
+    db = get_db()
+    if not db.execute("SELECT id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone():
+        abort(404)
+
+    name        = (request.form.get("name")        or "").strip()
+    part_number = (request.form.get("part_number") or "").strip() or None
+    supplier    = (request.form.get("supplier")    or "").strip() or None
+    cost_cents  = request.form.get("cost_cents", default=0, type=int)
+
+    if not name:
+        flash("Part name is required.", "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
+    if cost_cents < 0:
+        flash("Cost cannot be negative.", "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
+
+    db.execute(
+        """INSERT INTO parts (job_id, name, part_number, supplier, cost_cents)
+           VALUES (?, ?, ?, ?, ?)""",
+        (job_id, name, part_number, supplier, cost_cents),
+    )
+    db.commit()
+    flash(f"Part '{name}' added.", "success")
+    return redirect(url_for("admin.job_detail", job_id=job_id))
+
+
+@admin_bp.route("/parts/<int:part_id>/status", methods=["POST"])
+@login_required
+def part_update_status(part_id: int):
+    db = get_db()
+    part = db.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+    if not part:
+        abort(404)
+
+    new_status = (request.form.get("status") or "").strip()
+    valid = ("ordered", "received", "installed", "returned")
+    if new_status not in valid:
+        flash("Invalid part status.", "error")
+        return redirect(url_for("admin.job_detail", job_id=part["job_id"]))
+
+    db.execute("UPDATE parts SET status = ? WHERE id = ?", (new_status, part_id))
+    db.commit()
+    flash(f"Part status updated to '{new_status}'.", "success")
+    return redirect(url_for("admin.job_detail", job_id=part["job_id"]))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SMS log (global)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/sms-log")
+@login_required
+def sms_log():
+    db = get_db()
+    logs = db.execute(
+        """
+        SELECT s.*,
+               c.name  AS customer_name,
+               c.phone AS customer_phone,
+               rj.id   AS repair_job_id
+        FROM   sms_log   s
+        LEFT JOIN customers  c  ON c.id  = s.customer_id
+        LEFT JOIN repair_jobs rj ON rj.id = s.job_id
+        ORDER  BY s.sent_at DESC
+        LIMIT  200
+        """
+    ).fetchall()
+    ctx = {"logs": [dict(r) for r in logs]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/sms_log.html", **ctx)
