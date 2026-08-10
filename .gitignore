@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Flask instance folder (contains the live DB and secrets)
+instance/
+
+# Environment / secrets — never commit these
+.env
+.env.*
+config.py
+
+# OS
+.DS_Store
+Thumbs.db

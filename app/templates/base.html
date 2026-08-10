@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}The Crucible{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+    nav  { background: #1a1a2e; color: #fff; padding: .75rem 1.5rem; display: flex; gap: 1.5rem; align-items: center; }
+    nav a { color: #e0e0e0; text-decoration: none; }
+    nav a:hover { color: #fff; }
+    .container { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
+    .badge { display: inline-block; padding: .2em .5em; border-radius: 4px; font-size: .8em; font-weight: 600; }
+    .badge-received      { background: #cfe2ff; color: #084298; }
+    .badge-diagnosed     { background: #d1e7dd; color: #0f5132; }
+    .badge-awaiting_parts{ background: #fff3cd; color: #664d03; }
+    .badge-in_repair     { background: #cff4fc; color: #055160; }
+    .badge-quality_check { background: #e2d9f3; color: #432874; }
+    .badge-ready         { background: #d1e7dd; color: #0f5132; }
+    .badge-picked_up     { background: #d3d3d3; color: #333; }
+    .badge-cancelled     { background: #f8d7da; color: #842029; }
+    .badge-warranty_return{ background: #ffe5d0; color: #7d3311; }
+    .badge-closed        { background: #d3d3d3; color: #333; }
+    .badge-urgent { background: #f8d7da; color: #842029; }
+    .badge-high   { background: #fff3cd; color: #664d03; }
+    .badge-normal { background: #cfe2ff; color: #084298; }
+    .badge-low    { background: #d3d3d3; color: #333; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.1); padding: 1.25rem; margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f0f0f0; }
+    .btn { display: inline-block; padding: .4rem .9rem; border-radius: 4px; border: none; cursor: pointer; font-size: .9rem; text-decoration: none; }
+    .btn-primary { background: #0d6efd; color: #fff; }
+    .btn-secondary { background: #6c757d; color: #fff; }
+    .btn-danger  { background: #dc3545; color: #fff; }
+    .errors { background: #f8d7da; color: #842029; padding: .75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    .errors li { margin: .25rem 0; }
+  </style>
+</head>
+<body>
+<nav>
+  <strong style="font-size:1.1rem">🔧 The Crucible</strong>
+  {% if session.get('admin_id') %}
+  <a href="/admin/">Dashboard</a>
+  <a href="/admin/jobs">Jobs</a>
+  <a href="/admin/jobs/new">+ New Job</a>
+  <a href="/admin/customers">Customers</a>
+  <span style="flex:1"></span>
+  <span style="color:#aaa;font-size:.85rem">{{ session.get('admin_username') }}</span>
+  <a href="/auth/logout" style="color:#f88">Logout</a>
+  {% else %}
+  <span style="flex:1"></span>
+  <a href="/auth/login">Login</a>
+  {% endif %}
+</nav>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div style="max-width:1200px;margin:.75rem auto;padding:0 1rem">
+    {% for cat, msg in messages %}
+    <div style="padding:.6rem 1rem;border-radius:4px;margin-bottom:.5rem;
+      {% if cat == 'error' %}background:#f8d7da;color:#842029{% else %}background:#d1e7dd;color:#0f5132{% endif %}">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+<div class="container">
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

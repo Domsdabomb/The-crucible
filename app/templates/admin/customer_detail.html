@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.name }} — The Crucible{% endblock %}
+{% block content %}
+<h2>{{ customer.name }}</h2>
+
+<div class="card" style="max-width:500px">
+  <table>
+    <tr><td><strong>Phone</strong></td><td>{{ customer.phone }}</td></tr>
+    <tr><td><strong>Email</strong></td><td>{{ customer.email or '—' }}</td></tr>
+    <tr><td><strong>Customer since</strong></td><td>{{ customer.created_at[:10] }}</td></tr>
+  </table>
+</div>
+
+<h3>Devices ({{ devices|length }})</h3>
+{% for d in devices %}
+<div class="card" style="max-width:600px">
+  <strong>{{ d.make }} {{ d.model }}</strong><br>
+  S/N · IMEI: {{ d.serial_imei or '—' }}<br>
+  Condition: {{ d.condition_notes or '—' }}<br>
+  <small style="color:#888">Added {{ d.created_at[:10] }}</small>
+</div>
+{% else %}
+<p style="color:#999">No devices on record.</p>
+{% endfor %}
+
+<h3>Repair History ({{ jobs|length }})</h3>
+<div class="card">
+  <table>
+    <thead><tr><th>Job #</th><th>Device</th><th>Status</th><th>Priority</th><th>Tech</th><th>Total</th><th>Date</th></tr></thead>
+    <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td><a href="/admin/jobs/{{ j.id }}">#{{ j.id }}</a></td>
+      <td>{{ j.make }} {{ j.model }}</td>
+      <td><span class="badge badge-{{ j.status }}">{{ j.status.replace('_',' ') }}</span></td>
+      <td><span class="badge badge-{{ j.priority }}">{{ j.priority }}</span></td>
+      <td>{{ j.technician_name or '—' }}</td>
+      <td>${{ "%.2f"|format(j.total_cents/100) }}</td>
+      <td>{{ j.created_at[:10] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" style="color:#999;text-align:center">No repair jobs.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
