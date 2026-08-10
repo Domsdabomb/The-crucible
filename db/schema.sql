@@ -163,3 +163,14 @@ CREATE TABLE IF NOT EXISTS sms_log (
 
 CREATE INDEX IF NOT EXISTS idx_sms_job      ON sms_log (job_id);
 CREATE INDEX IF NOT EXISTS idx_sms_customer ON sms_log (customer_id);
+
+-- ─────────────────────────────────────────────
+-- 8. ADMINS
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admins (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,               -- "salt:sha256(salt+password)"
+    created_at    TEXT    NOT NULL
+                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);

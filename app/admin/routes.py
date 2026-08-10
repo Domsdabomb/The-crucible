@@ -23,6 +23,7 @@ from flask import (
 )
 
 from app.db import get_db
+from app.services.auth import login_required
 from app.services.sms_service import sms_intake, sms_ready
 from . import admin_bp
 
@@ -113,6 +114,7 @@ def _validate_phone(phone: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/")
+@login_required
 def dashboard():
     db = get_db()
 
@@ -172,6 +174,7 @@ def dashboard():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs")
+@login_required
 def job_list():
     db = get_db()
 
@@ -262,6 +265,7 @@ def job_list():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs/<int:job_id>")
+@login_required
 def job_detail(job_id: int):
     db = get_db()
 
@@ -322,6 +326,7 @@ def job_detail(job_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs/<int:job_id>/status", methods=["POST"])
+@login_required
 def job_update_status(job_id: int):
     db = get_db()
 
@@ -405,6 +410,7 @@ def job_update_status(job_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs/new", methods=["GET", "POST"])
+@login_required
 def job_new():
     if request.method == "GET":
         db = get_db()
@@ -551,6 +557,7 @@ def job_new():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs/<int:job_id>/edit", methods=["POST"])
+@login_required
 def job_edit(job_id: int):
     db = get_db()
 
@@ -627,7 +634,31 @@ def job_edit(job_id: int):
 # GET /admin/customers/<id>  — Full repair history
 # ─────────────────────────────────────────────────────────────────────────────
 
+@admin_bp.route("/customers")
+@login_required
+def customer_list():
+    db = get_db()
+    customers = db.execute(
+        """
+        SELECT c.*,
+               COUNT(DISTINCT rj.id) AS job_count,
+               SUM(CASE WHEN rj.status NOT IN ('picked_up','cancelled','closed') THEN 1 ELSE 0 END) AS active_jobs,
+               COUNT(DISTINCT s.id) AS sms_count
+        FROM   customers c
+        LEFT JOIN repair_jobs rj ON rj.customer_id = c.id
+        LEFT JOIN sms_log     s  ON s.customer_id  = c.id
+        GROUP  BY c.id
+        ORDER  BY c.created_at DESC
+        """
+    ).fetchall()
+    ctx = {"customers": [dict(r) for r in customers]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/customer_list.html", **ctx)
+
+
 @admin_bp.route("/customers/<int:customer_id>")
+@login_required
 def customer_detail(customer_id: int):
     db = get_db()
 
