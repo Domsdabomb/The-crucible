@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}New Invoice — Job #{{ job.id }} — The Crucible{% endblock %}
+{% block content %}
+<h2>New Invoice — Job #{{ job.id }}</h2>
+<p style="color:#666">{{ job.make }} {{ job.model }} · <a href="/admin/customers/{{ job.customer_id }}">{{ job.customer_name }}</a></p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+
+  <!-- Pricing summary -->
+  <div class="card">
+    <h3 style="margin-top:0">Job Pricing</h3>
+    <table style="width:auto">
+      <tr><td style="padding:.2rem .5rem">Labour</td><td>${{ "%.2f"|format(job.labour_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">Parts</td><td>${{ "%.2f"|format(job.parts_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">GST (5%)</td><td>${{ "%.2f"|format(job.gst_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">PST (7%)</td><td>${{ "%.2f"|format(job.pst_cents/100) }}</td></tr>
+      <tr style="border-top:2px solid #ddd">
+        <td style="padding:.4rem .5rem"><strong>Subtotal</strong></td>
+        <td><strong>${{ "%.2f"|format(job.total_cents/100) }}</strong></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Coin balance -->
+  <div class="card">
+    <h3 style="margin-top:0">Crucible Coins 🪙</h3>
+    <p>Customer balance: <strong>{{ wallet.balance_coins }} coins</strong>
+       (${{ "%.2f"|format(wallet.balance_coins * COIN_VALUE_CENTS / 100) }} value)</p>
+    {% if max_coins > 0 %}
+    <p style="color:#0f5132">Up to <strong>{{ max_coins }} coins</strong> can be applied
+       (25% cap → saves ${{ "%.2f"|format(max_coins * COIN_VALUE_CENTS / 100) }}).</p>
+    {% else %}
+    <p style="color:#999">No coins available to apply on this invoice.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Create form -->
+<div class="card">
+  <h3 style="margin-top:0">Create Invoice</h3>
+  <form method="post" action="/admin/jobs/{{ job.id }}/invoice/new"
+        style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+    <div>
+      <label style="display:block;font-size:.85rem;margin-bottom:.25rem">
+        Coins to Apply
+        <span style="color:#666">(0 – {{ max_coins }})</span>
+      </label>
+      <input type="number" name="coins_applied" value="0"
+             min="0" max="{{ max_coins }}"
+             style="padding:.4rem;border:1px solid #ccc;border-radius:4px;width:120px">
+      <p style="font-size:.8rem;color:#666;margin:.3rem 0 0">
+        1 coin = $1.00 CAD discount
+      </p>
+    </div>
+    <div>
+      <label style="display:block;font-size:.85rem;margin-bottom:.25rem">Notes (optional)</label>
+      <textarea name="notes" rows="3"
+                style="width:100%;padding:.4rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box"
+                placeholder="Internal notes about this invoice"></textarea>
+    </div>
+    <div style="grid-column:1/-1">
+      <button type="submit" class="btn btn-primary">Create Invoice</button>
+      <a href="/admin/jobs/{{ job.id }}" class="btn btn-secondary" style="margin-left:.5rem">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
