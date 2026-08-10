@@ -40,10 +40,31 @@
 <body>
 <nav>
   <strong style="font-size:1.1rem">🔧 The Crucible</strong>
+  {% if session.get('admin_id') %}
   <a href="/admin/">Dashboard</a>
   <a href="/admin/jobs">Jobs</a>
   <a href="/admin/jobs/new">+ New Job</a>
+  <a href="/admin/customers">Customers</a>
+  <span style="flex:1"></span>
+  <span style="color:#aaa;font-size:.85rem">{{ session.get('admin_username') }}</span>
+  <a href="/auth/logout" style="color:#f88">Logout</a>
+  {% else %}
+  <span style="flex:1"></span>
+  <a href="/auth/login">Login</a>
+  {% endif %}
 </nav>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div style="max-width:1200px;margin:.75rem auto;padding:0 1rem">
+    {% for cat, msg in messages %}
+    <div style="padding:.6rem 1rem;border-radius:4px;margin-bottom:.5rem;
+      {% if cat == 'error' %}background:#f8d7da;color:#842029{% else %}background:#d1e7dd;color:#0f5132{% endif %}">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
 <div class="container">
   {% block content %}{% endblock %}
 </div>

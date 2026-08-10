@@ -29,13 +29,17 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     from app.admin import admin_bp
+    from app.auth import auth_bp
     app.register_blueprint(admin_bp)
+    app.register_blueprint(auth_bp)
 
-    # Convenience redirect: / → /admin/
-    from flask import redirect, url_for
+    # Convenience redirect: / → /login (or /admin/ if already logged in)
+    from flask import redirect, url_for, session
 
     @app.route("/")
     def index():
-        return redirect(url_for("admin.dashboard"))
+        if "admin_id" in session:
+            return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("auth.login"))
 
     return app
