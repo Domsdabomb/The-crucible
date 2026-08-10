@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from flask import (
     abort,
+    flash,
     g,
     jsonify,
     redirect,
@@ -24,7 +25,11 @@ from flask import (
 
 from app.db import get_db
 from app.services.auth import login_required
-from app.services.sms_service import sms_intake, sms_ready
+from app.services.sms_service import sms_intake, sms_ready, send_sms
+from app.services.wallet import (
+    add_coins, calc_max_coins, get_or_create_wallet,
+    reward_job_pickup, spend_coins, COIN_VALUE_CENTS,
+)
 from . import admin_bp
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -372,6 +377,7 @@ def job_update_status(job_id: int):
         )
 
         # ── Auto-fire SMS when job becomes ready ─────────────────────────────
+        # ── Reward coins when job is picked up ───────────────────────────────
         sms_result = None
         if new_status == "ready":
             customer = db.execute(
@@ -379,7 +385,6 @@ def job_update_status(job_id: int):
                 (job["customer_id"],),
             ).fetchone()
             if customer:
-                # Commit first so sms_log INSERT (inside send_sms) works
                 db.commit()
                 sms_result = sms_ready(
                     phone=customer["phone"],
@@ -389,6 +394,17 @@ def job_update_status(job_id: int):
                 )
             else:
                 db.commit()
+        elif new_status == "picked_up":
+            job_full = db.execute(
+                "SELECT total_cents FROM repair_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            total_cents = job_full["total_cents"] if job_full else 0
+            db.commit()
+            try:
+                reward_job_pickup(db, job["customer_id"], job_id, total_cents)
+                db.commit()
+            except Exception:
+                pass  # reward failure should not block the status update
         else:
             db.commit()
 
@@ -844,3 +860,292 @@ def sms_log():
     if _wants_json():
         return jsonify(ctx)
     return render_template("admin/sms_log.html", **ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/invoices")
+@login_required
+def invoice_list():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT i.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               rj.status AS job_status
+        FROM   invoices i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        ORDER  BY i.created_at DESC
+        """
+    ).fetchall()
+    ctx = {"invoices": [dict(r) for r in rows]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/invoice_list.html", **ctx)
+
+
+@admin_bp.route("/jobs/<int:job_id>/invoice/new", methods=["GET", "POST"])
+@login_required
+def invoice_new(job_id: int):
+    db = get_db()
+
+    job = db.execute(
+        """
+        SELECT rj.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               d.make, d.model
+        FROM   repair_jobs rj
+        JOIN   customers   c ON c.id = rj.customer_id
+        JOIN   devices     d ON d.id = rj.device_id
+        WHERE  rj.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+
+    if job is None:
+        abort(404)
+
+    job = dict(job)
+    wallet = get_or_create_wallet(db, job["customer_id"])
+    subtotal = job["total_cents"]
+    max_coins = calc_max_coins(subtotal, wallet["balance_coins"])
+
+    if request.method == "GET":
+        return render_template(
+            "admin/invoice_new.html",
+            job=job,
+            wallet=wallet,
+            max_coins=max_coins,
+            COIN_VALUE_CENTS=COIN_VALUE_CENTS,
+        )
+
+    # ── POST: create invoice ──────────────────────────────────────────────────
+    coins_to_apply = request.form.get("coins_applied", default=0, type=int)
+    notes = (request.form.get("notes") or "").strip() or None
+
+    if coins_to_apply < 0:
+        coins_to_apply = 0
+    if coins_to_apply > max_coins:
+        flash(f"You can apply at most {max_coins} coins on this invoice.", "error")
+        return redirect(url_for("admin.invoice_new", job_id=job_id))
+
+    discount_cents = coins_to_apply * COIN_VALUE_CENTS
+
+    try:
+        db.execute("BEGIN")
+
+        if coins_to_apply > 0:
+            spend_coins(db, job["customer_id"], coins_to_apply,
+                        reason=f"Invoice for Job #{job_id}", job_id=job_id)
+
+        cur = db.execute(
+            """
+            INSERT INTO invoices
+                (job_id, customer_id, labour_cents, parts_cents, gst_cents, pst_cents,
+                 coins_applied, discount_cents, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, job["customer_id"],
+             job["labour_cents"], job["parts_cents"],
+             job["gst_cents"],   job["pst_cents"],
+             coins_to_apply, discount_cents, notes),
+        )
+        invoice_id = cur.lastrowid
+        db.commit()
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        flash(str(e), "error")
+        return redirect(url_for("admin.invoice_new", job_id=job_id))
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+    flash(f"Invoice #{invoice_id} created.", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@admin_bp.route("/invoices/<int:invoice_id>")
+@login_required
+def invoice_detail(invoice_id: int):
+    db = get_db()
+    inv = db.execute(
+        """
+        SELECT i.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               d.make, d.model,
+               rj.status AS job_status
+        FROM   invoices    i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        JOIN   devices     d  ON d.id  = rj.device_id
+        WHERE  i.id = ?
+        """,
+        (invoice_id,),
+    ).fetchone()
+    if inv is None:
+        abort(404)
+
+    ctx = {"inv": dict(inv)}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/invoice_detail.html", **ctx)
+
+
+@admin_bp.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
+@login_required
+def invoice_mark_paid(invoice_id: int):
+    db = get_db()
+    inv = db.execute("SELECT id, status FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if inv is None:
+        abort(404)
+    if inv["status"] == "paid":
+        flash("Invoice is already marked paid.", "error")
+        return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+    db.execute(
+        "UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?",
+        (_now_iso(), invoice_id),
+    )
+    db.commit()
+    flash("Invoice marked as paid.", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@admin_bp.route("/invoices/<int:invoice_id>/send-sms", methods=["POST"])
+@login_required
+def invoice_send_sms(invoice_id: int):
+    db = get_db()
+    inv = db.execute(
+        """
+        SELECT i.*, c.name AS customer_name, c.phone AS customer_phone,
+               d.make, d.model
+        FROM   invoices    i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        JOIN   devices     d  ON d.id  = rj.device_id
+        WHERE  i.id = ?
+        """,
+        (invoice_id,),
+    ).fetchone()
+    if inv is None:
+        abort(404)
+
+    inv = dict(inv)
+    amount_dollars = inv["amount_due_cents"] / 100
+    body = (
+        f"Hi {inv['customer_name']}, your invoice for Job #{inv['job_id']} "
+        f"({inv['make']} {inv['model']}) is ready. "
+        f"Amount due: ${amount_dollars:.2f} CAD. "
+        f"Thank you for choosing The Crucible!"
+    )
+    result = send_sms(
+        phone=inv["customer_phone"],
+        message=body,
+        customer_id=inv["customer_id"],
+        job_id=inv["job_id"],
+    )
+    if result.get("success"):
+        flash("Invoice SMS sent.", "success")
+    else:
+        flash(f"SMS failed: {result.get('error_message', 'unknown error')}", "error")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wallet / Crucible Coin routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/wallets")
+@login_required
+def wallet_list():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT w.*, c.name AS customer_name, c.phone AS customer_phone
+        FROM   wallets    w
+        JOIN   customers  c ON c.id = w.customer_id
+        ORDER  BY w.balance_coins DESC, c.name ASC
+        """
+    ).fetchall()
+    ctx = {"wallets": [dict(r) for r in rows]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/wallet_list.html", **ctx)
+
+
+@admin_bp.route("/wallets/<int:customer_id>")
+@login_required
+def wallet_detail(customer_id: int):
+    db = get_db()
+
+    customer = db.execute(
+        "SELECT * FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone()
+    if customer is None:
+        abort(404)
+
+    wallet = get_or_create_wallet(db, customer_id)
+    db.commit()  # persist wallet if just created
+
+    txns = db.execute(
+        """
+        SELECT * FROM wallet_transactions
+        WHERE wallet_id = ?
+        ORDER BY created_at DESC
+        """,
+        (wallet["id"],),
+    ).fetchall()
+
+    ctx = {
+        "customer": dict(customer),
+        "wallet":   wallet,
+        "txns":     [dict(t) for t in txns],
+    }
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/wallet_detail.html", **ctx)
+
+
+@admin_bp.route("/wallets/<int:customer_id>/adjust", methods=["POST"])
+@login_required
+def wallet_adjust(customer_id: int):
+    db = get_db()
+    customer = db.execute(
+        "SELECT id FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone()
+    if customer is None:
+        abort(404)
+
+    txn_type = (request.form.get("type") or "").strip()
+    amount   = request.form.get("amount", default=0, type=int)
+    reason   = (request.form.get("reason") or "").strip()
+
+    if txn_type not in ("credit", "debit"):
+        flash("Type must be 'credit' or 'debit'.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+    if amount <= 0:
+        flash("Amount must be at least 1 coin.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+    if not reason:
+        flash("Reason is required.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+
+    try:
+        db.execute("BEGIN")
+        if txn_type == "credit":
+            add_coins(db, customer_id, amount, reason=f"[Manual] {reason}")
+        else:
+            spend_coins(db, customer_id, amount, reason=f"[Manual] {reason}")
+        db.commit()
+        flash(f"{'Credited' if txn_type == 'credit' else 'Debited'} {amount} coin(s).", "success")
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        flash(str(e), "error")
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+    return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
