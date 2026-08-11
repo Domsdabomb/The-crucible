@@ -42,8 +42,7 @@ CREATE TABLE IF NOT EXISTS devices (
     make             TEXT    NOT NULL,
     model            TEXT    NOT NULL,
     serial_imei      TEXT,
-    -- TODO: encrypt passcode with Fernet (symmetric) before storing in prod;
-    --       never store plaintext credentials in a production database.
+    -- Fernet-encrypted (see app/services/crypto.py); never store plaintext here.
     passcode         TEXT,
     condition_notes  TEXT,
     created_at       TEXT    NOT NULL
@@ -230,7 +229,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 CREATE TABLE IF NOT EXISTS admins (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,               -- "salt:sha256(salt+password)"
+    password_hash TEXT    NOT NULL,               -- werkzeug generate_password_hash() (PBKDF2-SHA256)
     created_at    TEXT    NOT NULL
                   DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );

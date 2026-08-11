@@ -40,6 +40,7 @@
   <h3 style="margin-top:0">Create Invoice</h3>
   <form method="post" action="/admin/jobs/{{ job.id }}/invoice/new"
         style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label style="display:block;font-size:.85rem;margin-bottom:.25rem">
         Coins to Apply

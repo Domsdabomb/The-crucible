@@ -13,6 +13,7 @@
     {% endwith %}
 
     <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:1rem">
         <label style="display:block;margin-bottom:.3rem;font-weight:600">Username</label>
         <input name="username" type="text" autocomplete="username" autofocus required

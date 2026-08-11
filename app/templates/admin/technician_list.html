@@ -9,6 +9,7 @@
   <div class="card">
     <h3 style="margin-top:0">Add Technician</h3>
     <form method="post" action="/admin/technicians/new">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:.75rem">
         <label style="display:block;font-size:.85rem;margin-bottom:.2rem">Name *</label>
         <input name="name" type="text" required style="width:100%;padding:.4rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
@@ -47,6 +48,7 @@
         </td>
         <td>
           <form method="post" action="/admin/technicians/{{ t.id }}/toggle" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">
               {{ 'Deactivate' if t.active else 'Activate' }}
             </button>

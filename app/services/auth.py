@@ -3,24 +3,20 @@ Auth helpers — password hashing and the login_required decorator.
 """
 
 import functools
-import secrets
-from hashlib import sha256
 
 from flask import session, redirect, url_for, flash, request
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.db import get_db
 
 
 def hash_password(password: str) -> str:
-    """Return "salt:sha256(salt+password)"."""
-    salt = secrets.token_hex(16)
-    digest = sha256((salt + password).encode()).hexdigest()
-    return f"{salt}:{digest}"
+    """Return a salted PBKDF2-SHA256 hash (werkzeug's default method)."""
+    return generate_password_hash(password)
 
 
 def verify_password(password: str, stored: str) -> bool:
-    salt, digest = stored.split(":", 1)
-    return sha256((salt + password).encode()).hexdigest() == digest
+    return check_password_hash(stored, password)
 
 
 def get_admin(username: str):

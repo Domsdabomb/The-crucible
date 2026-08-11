@@ -10,6 +10,7 @@ BC tax rates applied server-side:
 """
 
 import re
+import sqlite3
 from datetime import datetime, timezone
 
 from flask import (
@@ -25,6 +26,7 @@ from flask import (
 
 from app.db import get_db
 from app.services.auth import login_required
+from app.services.crypto import encrypt_passcode, decrypt_passcode
 from app.services.sms_service import sms_intake, sms_ready, send_sms
 from app.services.wallet import (
     add_coins, calc_max_coins, get_or_create_wallet,
@@ -112,6 +114,22 @@ def _validate_phone(phone: str) -> str:
             f"Phone must be a Canadian E.164 number (e.g. +12505550100), got: {phone!r}"
         )
     return phone
+
+
+def _job_new_error_response(db, errors: list[str]):
+    """Re-render the intake form with errors (used for both validation and DB failures)."""
+    technicians = db.execute(
+        "SELECT id, name FROM technicians WHERE active = 1 ORDER BY name"
+    ).fetchall()
+    if _wants_json():
+        return jsonify({"errors": errors}), 400
+    return render_template(
+        "admin/job_new.html",
+        errors=errors,
+        form=request.form,
+        technicians=[dict(t) for t in technicians],
+        priorities=VALID_PRIORITIES,
+    ), 400
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -292,6 +310,9 @@ def job_detail(job_id: int):
     if job is None:
         abort(404)
 
+    job = dict(job)
+    job["passcode"] = decrypt_passcode(job["passcode"])
+
     parts = db.execute(
         "SELECT * FROM parts WHERE job_id = ? ORDER BY created_at",
         (job_id,),
@@ -312,7 +333,7 @@ def job_detail(job_id: int):
     ).fetchall()
 
     ctx = {
-        "job":         dict(job),
+        "job":         job,
         "parts":       [dict(p) for p in parts],
         "history":     [dict(h) for h in history],
         "sms_logs":    [dict(s) for s in sms_logs],
@@ -479,19 +500,7 @@ def job_new():
         errors.append("Quoted amount cannot be negative.")
 
     if errors:
-        if _wants_json():
-            return jsonify({"errors": errors}), 400
-        db2 = get_db()
-        technicians = db2.execute(
-            "SELECT id, name FROM technicians WHERE active = 1 ORDER BY name"
-        ).fetchall()
-        return render_template(
-            "admin/job_new.html",
-            errors=errors,
-            form=request.form,
-            technicians=[dict(t) for t in technicians],
-            priorities=VALID_PRIORITIES,
-        ), 400
+        return _job_new_error_response(db, errors)
 
     # ── Single transaction: upsert customer → device → job → history ─────────
     try:
@@ -524,7 +533,7 @@ def job_new():
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (customer_id, device_make, device_model, device_serial,
-             device_passcode, device_condition),
+             encrypt_passcode(device_passcode), device_condition),
         )
         device_id = cur.lastrowid
 
@@ -558,6 +567,9 @@ def job_new():
             customer_id=customer_id,
         )
 
+    except sqlite3.IntegrityError as e:
+        db.execute("ROLLBACK")
+        return _job_new_error_response(db, [f"Could not save job (data conflict): {e}"])
     except Exception:
         db.execute("ROLLBACK")
         raise
@@ -631,6 +643,13 @@ def job_edit(job_id: int):
         db.execute("BEGIN")
         db.execute(f"UPDATE repair_jobs SET {set_clause} WHERE id = ?", values)
         db.commit()
+    except sqlite3.IntegrityError as e:
+        db.execute("ROLLBACK")
+        msg = f"Could not save changes (data conflict): {e}"
+        if _wants_json():
+            return jsonify({"errors": [msg]}), 400
+        flash(msg, "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
     except Exception:
         db.execute("ROLLBACK")
         raise
@@ -758,11 +777,18 @@ def technician_new():
             return redirect(url_for("admin.technician_list"))
 
     db = get_db()
-    db.execute(
-        "INSERT INTO technicians (name, email, phone) VALUES (?, ?, ?)",
-        (name, email, phone),
-    )
-    db.commit()
+    try:
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO technicians (name, email, phone) VALUES (?, ?, ?)",
+            (name, email, phone),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.execute("ROLLBACK")
+        flash(f"A technician with email {email!r} already exists.", "error")
+        return redirect(url_for("admin.technician_list"))
+
     flash(f"Technician '{name}' added.", "success")
     return redirect(url_for("admin.technician_list"))
 
@@ -1070,7 +1096,7 @@ def wallet_list():
         ORDER  BY w.balance_coins DESC, c.name ASC
         """
     ).fetchall()
-    ctx = {"wallets": [dict(r) for r in rows]}
+    ctx = {"wallets": [dict(r) for r in rows], "COIN_VALUE_CENTS": COIN_VALUE_CENTS}
     if _wants_json():
         return jsonify(ctx)
     return render_template("admin/wallet_list.html", **ctx)
@@ -1103,6 +1129,7 @@ def wallet_detail(customer_id: int):
         "customer": dict(customer),
         "wallet":   wallet,
         "txns":     [dict(t) for t in txns],
+        "COIN_VALUE_CENTS": COIN_VALUE_CENTS,
     }
     if _wants_json():
         return jsonify(ctx)
