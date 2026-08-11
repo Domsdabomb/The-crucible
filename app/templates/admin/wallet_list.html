@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Crucible Coins — The Crucible{% endblock %}
+{% block content %}
+<h2>Crucible Coins 🪙</h2>
+
+<div class="card">
+  {% if wallets %}
+  <table>
+    <thead>
+      <tr>
+        <th>Customer</th>
+        <th>Phone</th>
+        <th style="text-align:right">Balance (coins)</th>
+        <th style="text-align:right">Value</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for w in wallets %}
+    <tr>
+      <td>{{ w.customer_name }}</td>
+      <td>{{ w.customer_phone }}</td>
+      <td style="text-align:right"><strong>{{ w.balance_coins }} 🪙</strong></td>
+      <td style="text-align:right">${{ "%.2f"|format(w.balance_coins * COIN_VALUE_CENTS / 100) }}</td>
+      <td><a href="/admin/wallets/{{ w.customer_id }}" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">View</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;margin:0">No customer wallets yet. Wallets are created automatically when a job is picked up.</p>
+  {% endif %}
+</div>
+{% endblock %}
