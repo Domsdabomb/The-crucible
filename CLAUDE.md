@@ -25,6 +25,7 @@ the-crucible/
 │   │   └── routes.py       # login / logout / first-run setup
 │   ├── services/
 │   │   ├── auth.py          # Password hashing (werkzeug PBKDF2) + login_required decorator
+│   │   ├── crypto.py        # Fernet encrypt/decrypt for device passcodes at rest
 │   │   ├── sms_service.py   # SMS stub: send_sms, sms_intake, sms_ready
 │   │   └── wallet.py        # Crucible Coin loyalty wallet: earn/spend/redeem logic
 │   └── templates/
@@ -42,9 +43,13 @@ the-crucible/
 │           └── sms_log.html
 ├── db/
 │   └── schema.sql          # Full SQLite schema (11 tables, indexes, trigger)
+├── tests/                   # pytest suite — see Testing section below
+│   ├── conftest.py
+│   └── test_*.py
 ├── .claude/
 │   └── launch.json          # Claude Code preview: python run.py on port 5000
-├── requirements.txt         # flask>=3.0,<4.0 (cryptography commented out — TODO)
+├── pytest.ini
+├── requirements.txt         # flask, cryptography (Fernet), pytest
 └── .gitignore
 ```
 
@@ -55,8 +60,10 @@ the-crucible/
 - **Python 3.12 / Flask 3.x** — app factory + Blueprint pattern
 - **SQLite 3.35+** — raw `sqlite3`, no ORM; uses GENERATED columns and WAL mode
 - **werkzeug.security** — password hashing (PBKDF2-SHA256), ships with Flask, no extra dependency
+- **cryptography (Fernet)** — symmetric encryption for device passcodes at rest
 - **stdlib `urllib.request`** — SMS HTTP stub (no extra dependencies yet)
 - **Jinja2** — templating (built into Flask)
+- **pytest** — automated test suite (`tests/`)
 
 No Twilio dependency. SMS is currently a stub that POSTs to a placeholder `invoicetosms.com` URL. The real provider and API key aren't wired up yet.
 
@@ -84,7 +91,7 @@ The schema lives in `db/schema.sql` and is applied via `flask init-db` (or `init
 - **Phone is the customer upsert key** — `customers.phone` is UNIQUE; intake updates name/email if phone already exists.
 - **Money is stored as integer cents** — avoids floating-point drift; all `*_cents` columns. `repair_jobs.total_cents` and `invoices.subtotal_cents` / `amount_due_cents` are `GENERATED ALWAYS AS` columns.
 - **WAL mode** — `PRAGMA journal_mode = WAL` is set on every connection in `get_db()`.
-- **Device passcode** is stored in plaintext — there is a `TODO` comment to encrypt it with Fernet before production. The `cryptography` package is in `requirements.txt` but commented out.
+- **Device passcode** is encrypted at rest with Fernet (`app/services/crypto.py`) — `job_new` encrypts on write, `job_detail` decrypts for display. Never read/write `devices.passcode` directly without going through `encrypt_passcode`/`decrypt_passcode`.
 - **Passwords** are hashed with `werkzeug.security.generate_password_hash` (PBKDF2-SHA256, salted). Do not roll custom hashing here.
 
 ---
@@ -131,11 +138,27 @@ All state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are protected by an 
 
 ---
 
+## Testing
+
+`tests/` holds a pytest suite covering the state machine, tax calc, wallet earn/spend/redeem, CSRF enforcement, auth (hash/verify, login/setup flow), `IntegrityError` handling, and passcode encryption (including asserting the raw DB value is never plaintext).
+
+```bash
+python -m pytest          # run from the project root
+```
+
+Notes for writing new tests (see `tests/conftest.py`):
+- The `app` fixture builds a fresh app with a temp-file SQLite DB (not `:memory:` — each `sqlite3.connect()` call gets its own empty `:memory:` DB, which breaks across the multiple connections a test makes) and runs `init_db()`.
+- The `no_network_sms` fixture (autouse) monkeypatches `urllib.request.urlopen` so tests never hit the real network even though `sms_service` is a live-HTTP stub.
+- CSRF is **not** disabled for tests — use the `csrf_extractor` fixture to pull the token out of a GET response before POSTing, same as a real browser would. Use the `admin_client` fixture for anything behind `login_required`.
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `SECRET_KEY` | Yes (prod) | Flask session secret; defaults to `"dev-change-in-production"` |
+| `PASSCODE_ENCRYPTION_KEY` | Recommended (prod) | urlsafe-base64 Fernet key for `devices.passcode`. If unset, a key is auto-generated into `instance/passcode.key` on first use — fine for dev, but losing that file makes existing encrypted passcodes unrecoverable, so set this explicitly in production. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
 | `INVOICETOSMS_API_KEY` | For SMS | Bearer token for the SMS provider |
 | `SMS_SENDER_ID` | No | Sender name shown on SMS; defaults to `"TheCrucible"` |
 
@@ -245,7 +268,7 @@ An invoice snapshots a job's `labour_cents` / `parts_cents` / `gst_cents` / `pst
 - **Dual HTML/JSON** — most read routes check `_wants_json()` and can return JSON. Useful for future API consumers or AJAX.
 - **CSRF token required on every POST form** — see the CSRF Protection section above.
 - **Auth required** — every `admin_bp` route is behind `@login_required`. `auth_bp` routes (`login`, `setup`) are intentionally open.
-- **No test suite** — no automated tests exist.
+- **Tests** — run `python -m pytest` before committing route/service changes; see the Testing section above.
 - **Schema in SQL file** — `db/schema.sql` is the source of truth, not inline Python strings.
 
 ---
@@ -294,8 +317,8 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 
 ## Known TODOs (from codebase)
 
-- **Passcode encryption** — `devices.passcode` stored in plaintext; encrypt with Fernet (`cryptography` package, already in requirements but commented out).
 - **Real SMS provider** — `sms_service.py` points at a placeholder URL; wire up real credentials via `INVOICETOSMS_API_KEY`.
 - **Customer self-serve tracking** — the v1 `/track` route (public job-status lookup) has not been ported.
-- **No automated tests** — nothing to run in CI yet.
 - **Single account tier** — no per-technician logins or role separation; every admin account has full access.
+- **No login rate limiting** — `/auth/login` has no lockout/throttle on repeated failed attempts.
+- **CI** — the pytest suite exists (`tests/`) but nothing runs it automatically yet; no GitHub Actions workflow.

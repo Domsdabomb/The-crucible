@@ -42,8 +42,7 @@ CREATE TABLE IF NOT EXISTS devices (
     make             TEXT    NOT NULL,
     model            TEXT    NOT NULL,
     serial_imei      TEXT,
-    -- TODO: encrypt passcode with Fernet (symmetric) before storing in prod;
-    --       never store plaintext credentials in a production database.
+    -- Fernet-encrypted (see app/services/crypto.py); never store plaintext here.
     passcode         TEXT,
     condition_notes  TEXT,
     created_at       TEXT    NOT NULL

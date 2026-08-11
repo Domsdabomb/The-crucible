@@ -26,6 +26,7 @@ from flask import (
 
 from app.db import get_db
 from app.services.auth import login_required
+from app.services.crypto import encrypt_passcode, decrypt_passcode
 from app.services.sms_service import sms_intake, sms_ready, send_sms
 from app.services.wallet import (
     add_coins, calc_max_coins, get_or_create_wallet,
@@ -309,6 +310,9 @@ def job_detail(job_id: int):
     if job is None:
         abort(404)
 
+    job = dict(job)
+    job["passcode"] = decrypt_passcode(job["passcode"])
+
     parts = db.execute(
         "SELECT * FROM parts WHERE job_id = ? ORDER BY created_at",
         (job_id,),
@@ -529,7 +533,7 @@ def job_new():
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (customer_id, device_make, device_model, device_serial,
-             device_passcode, device_condition),
+             encrypt_passcode(device_passcode), device_condition),
         )
         device_id = cur.lastrowid
 
@@ -1091,7 +1095,7 @@ def wallet_list():
         ORDER  BY w.balance_coins DESC, c.name ASC
         """
     ).fetchall()
-    ctx = {"wallets": [dict(r) for r in rows]}
+    ctx = {"wallets": [dict(r) for r in rows], "COIN_VALUE_CENTS": COIN_VALUE_CENTS}
     if _wants_json():
         return jsonify(ctx)
     return render_template("admin/wallet_list.html", **ctx)
@@ -1124,6 +1128,7 @@ def wallet_detail(customer_id: int):
         "customer": dict(customer),
         "wallet":   wallet,
         "txns":     [dict(t) for t in txns],
+        "COIN_VALUE_CENTS": COIN_VALUE_CENTS,
     }
     if _wants_json():
         return jsonify(ctx)

@@ -21,7 +21,7 @@
       <td>{{ w.customer_name }}</td>
       <td>{{ w.customer_phone }}</td>
       <td style="text-align:right"><strong>{{ w.balance_coins }} 🪙</strong></td>
-      <td style="text-align:right">${{ "%.2f"|format(w.balance_coins) }}</td>
+      <td style="text-align:right">${{ "%.2f"|format(w.balance_coins * COIN_VALUE_CENTS / 100) }}</td>
       <td><a href="/admin/wallets/{{ w.customer_id }}" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">View</a></td>
     </tr>
     {% endfor %}
