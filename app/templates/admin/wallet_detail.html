@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Wallet — {{ customer.name }} — The Crucible{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h2 style="margin:0">🪙 Wallet — <a href="/admin/customers/{{ customer.id }}">{{ customer.name }}</a></h2>
+  <span style="font-size:1.5rem;font-weight:700;color:#0d6efd">{{ wallet.balance_coins }} coins</span>
+</div>
+<p style="color:#666;margin-top:-.5rem;margin-bottom:1rem">
+  Current value: <strong>${{ "%.2f"|format(wallet.balance_coins * COIN_VALUE_CENTS / 100) }} CAD</strong> · {{ customer.phone }}
+</p>
+
+<!-- Manual adjust -->
+<div class="card">
+  <h3 style="margin-top:0">Manual Adjustment</h3>
+  <form method="post" action="/admin/wallets/{{ customer.id }}/adjust"
+        style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Type</label>
+      <select name="type">
+        <option value="credit">Credit (add coins)</option>
+        <option value="debit">Debit (remove coins)</option>
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Coins</label>
+      <input type="number" name="amount" value="1" min="1"
+             style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:80px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Reason *</label>
+      <input type="text" name="reason" required placeholder="e.g. Goodwill adjustment"
+             style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:220px">
+    </div>
+    <button type="submit" class="btn btn-primary">Apply</button>
+  </form>
+</div>
+
+<!-- Transaction history -->
+<div class="card">
+  <h3 style="margin-top:0">Transaction History ({{ txns|length }})</h3>
+  {% if txns %}
+  <table>
+    <thead>
+      <tr><th>Type</th><th>Amount</th><th>Balance After</th><th>Reason</th><th>Job</th><th>When</th></tr>
+    </thead>
+    <tbody>
+    {% for t in txns %}
+    <tr>
+      <td>
+        {% if t.type == 'credit' %}
+        <span class="badge badge-diagnosed">credit</span>
+        {% else %}
+        <span class="badge badge-cancelled">debit</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if t.type == 'credit' %}+{% else %}−{% endif %}{{ t.amount_coins }} 🪙
+      </td>
+      <td>{{ t.balance_after }} 🪙</td>
+      <td>{{ t.reason }}</td>
+      <td>
+        {% if t.job_id %}
+        <a href="/admin/jobs/{{ t.job_id }}">#{{ t.job_id }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td style="white-space:nowrap">{{ t.created_at[:16].replace('T',' ') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;margin:0">No transactions yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

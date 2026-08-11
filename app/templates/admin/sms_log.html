@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}SMS Log — The Crucible{% endblock %}
+{% block content %}
+<h2>SMS Log <span style="color:#999;font-weight:normal;font-size:.8em">(last {{ logs|length }})</span></h2>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Customer</th>
+        <th>Job</th>
+        <th>Message</th>
+        <th>Provider ID</th>
+        <th>Error</th>
+        <th>Sent</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in logs %}
+    <tr>
+      <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
+      <td>
+        {% if s.customer_id %}
+        <a href="/admin/customers/{{ s.customer_id }}">{{ s.customer_name or s.customer_phone }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if s.repair_job_id %}
+        <a href="/admin/jobs/{{ s.repair_job_id }}">#{{ s.repair_job_id }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td style="max-width:280px;white-space:pre-wrap;font-size:.85rem">{{ s.message_body }}</td>
+      <td style="font-size:.8rem;color:#666">{{ s.provider_message_id or '—' }}</td>
+      <td style="color:#dc3545;font-size:.85rem">{{ s.error_message or '—' }}</td>
+      <td style="white-space:nowrap">{{ s.sent_at[:16].replace('T',' ') }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" style="text-align:center;color:#999">No SMS messages yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

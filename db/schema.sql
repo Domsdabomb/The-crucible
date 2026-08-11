@@ -42,8 +42,7 @@ CREATE TABLE IF NOT EXISTS devices (
     make             TEXT    NOT NULL,
     model            TEXT    NOT NULL,
     serial_imei      TEXT,
-    -- TODO: encrypt passcode with Fernet (symmetric) before storing in prod;
-    --       never store plaintext credentials in a production database.
+    -- Fernet-encrypted (see app/services/crypto.py); never store plaintext here.
     passcode         TEXT,
     condition_notes  TEXT,
     created_at       TEXT    NOT NULL
@@ -165,12 +164,72 @@ CREATE INDEX IF NOT EXISTS idx_sms_job      ON sms_log (job_id);
 CREATE INDEX IF NOT EXISTS idx_sms_customer ON sms_log (customer_id);
 
 -- ─────────────────────────────────────────────
--- 8. ADMINS
+-- 8. WALLETS  (Crucible Coin loyalty balances)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS wallets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id   INTEGER NOT NULL UNIQUE REFERENCES customers (id) ON DELETE CASCADE,
+    balance_coins INTEGER NOT NULL DEFAULT 0 CHECK (balance_coins >= 0),
+    created_at    TEXT    NOT NULL
+                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at    TEXT    NOT NULL
+                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- ─────────────────────────────────────────────
+-- 9. WALLET TRANSACTIONS
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    wallet_id     INTEGER NOT NULL REFERENCES wallets (id) ON DELETE CASCADE,
+    type          TEXT    NOT NULL CHECK (type IN ('credit', 'debit')),
+    amount_coins  INTEGER NOT NULL CHECK (amount_coins > 0),
+    balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
+    reason        TEXT    NOT NULL,
+    job_id        INTEGER REFERENCES repair_jobs (id) ON DELETE SET NULL,
+    created_at    TEXT    NOT NULL
+                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_wallet_txn_wallet ON wallet_transactions (wallet_id);
+
+-- ─────────────────────────────────────────────
+-- 10. INVOICES
+-- ─────────────────────────────────────────────
+-- Each invoice snaps the job's pricing at creation time.
+-- coins_applied × 100 = discount_cents (1 coin = $1 CAD).
+CREATE TABLE IF NOT EXISTS invoices (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id           INTEGER NOT NULL REFERENCES repair_jobs (id) ON DELETE RESTRICT,
+    customer_id      INTEGER NOT NULL REFERENCES customers   (id) ON DELETE RESTRICT,
+    labour_cents     INTEGER NOT NULL DEFAULT 0 CHECK (labour_cents  >= 0),
+    parts_cents      INTEGER NOT NULL DEFAULT 0 CHECK (parts_cents   >= 0),
+    gst_cents        INTEGER NOT NULL DEFAULT 0 CHECK (gst_cents     >= 0),
+    pst_cents        INTEGER NOT NULL DEFAULT 0 CHECK (pst_cents     >= 0),
+    subtotal_cents   INTEGER GENERATED ALWAYS AS
+                     (labour_cents + parts_cents + gst_cents + pst_cents) STORED,
+    coins_applied    INTEGER NOT NULL DEFAULT 0 CHECK (coins_applied  >= 0),
+    discount_cents   INTEGER NOT NULL DEFAULT 0 CHECK (discount_cents >= 0),
+    amount_due_cents INTEGER GENERATED ALWAYS AS
+                     (labour_cents + parts_cents + gst_cents + pst_cents - discount_cents) STORED,
+    status           TEXT    NOT NULL DEFAULT 'unpaid'
+                     CHECK (status IN ('unpaid', 'paid')),
+    paid_at          TEXT,
+    notes            TEXT,
+    created_at       TEXT    NOT NULL
+                     DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_job      ON invoices (job_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
+
+-- ─────────────────────────────────────────────
+-- 11. ADMINS
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS admins (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,               -- "salt:sha256(salt+password)"
+    password_hash TEXT    NOT NULL,               -- werkzeug generate_password_hash() (PBKDF2-SHA256)
     created_at    TEXT    NOT NULL
                   DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );

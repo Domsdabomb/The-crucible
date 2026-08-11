@@ -10,10 +10,12 @@ BC tax rates applied server-side:
 """
 
 import re
+import sqlite3
 from datetime import datetime, timezone
 
 from flask import (
     abort,
+    flash,
     g,
     jsonify,
     redirect,
@@ -24,7 +26,12 @@ from flask import (
 
 from app.db import get_db
 from app.services.auth import login_required
-from app.services.sms_service import sms_intake, sms_ready
+from app.services.crypto import encrypt_passcode, decrypt_passcode
+from app.services.sms_service import sms_intake, sms_ready, send_sms
+from app.services.wallet import (
+    add_coins, calc_max_coins, get_or_create_wallet,
+    reward_job_pickup, spend_coins, COIN_VALUE_CENTS,
+)
 from . import admin_bp
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +114,22 @@ def _validate_phone(phone: str) -> str:
             f"Phone must be a Canadian E.164 number (e.g. +12505550100), got: {phone!r}"
         )
     return phone
+
+
+def _job_new_error_response(db, errors: list[str]):
+    """Re-render the intake form with errors (used for both validation and DB failures)."""
+    technicians = db.execute(
+        "SELECT id, name FROM technicians WHERE active = 1 ORDER BY name"
+    ).fetchall()
+    if _wants_json():
+        return jsonify({"errors": errors}), 400
+    return render_template(
+        "admin/job_new.html",
+        errors=errors,
+        form=request.form,
+        technicians=[dict(t) for t in technicians],
+        priorities=VALID_PRIORITIES,
+    ), 400
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,6 +310,9 @@ def job_detail(job_id: int):
     if job is None:
         abort(404)
 
+    job = dict(job)
+    job["passcode"] = decrypt_passcode(job["passcode"])
+
     parts = db.execute(
         "SELECT * FROM parts WHERE job_id = ? ORDER BY created_at",
         (job_id,),
@@ -372,6 +398,7 @@ def job_update_status(job_id: int):
         )
 
         # ── Auto-fire SMS when job becomes ready ─────────────────────────────
+        # ── Reward coins when job is picked up ───────────────────────────────
         sms_result = None
         if new_status == "ready":
             customer = db.execute(
@@ -379,7 +406,6 @@ def job_update_status(job_id: int):
                 (job["customer_id"],),
             ).fetchone()
             if customer:
-                # Commit first so sms_log INSERT (inside send_sms) works
                 db.commit()
                 sms_result = sms_ready(
                     phone=customer["phone"],
@@ -389,6 +415,17 @@ def job_update_status(job_id: int):
                 )
             else:
                 db.commit()
+        elif new_status == "picked_up":
+            job_full = db.execute(
+                "SELECT total_cents FROM repair_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            total_cents = job_full["total_cents"] if job_full else 0
+            db.commit()
+            try:
+                reward_job_pickup(db, job["customer_id"], job_id, total_cents)
+                db.commit()
+            except Exception:
+                pass  # reward failure should not block the status update
         else:
             db.commit()
 
@@ -463,19 +500,7 @@ def job_new():
         errors.append("Quoted amount cannot be negative.")
 
     if errors:
-        if _wants_json():
-            return jsonify({"errors": errors}), 400
-        db2 = get_db()
-        technicians = db2.execute(
-            "SELECT id, name FROM technicians WHERE active = 1 ORDER BY name"
-        ).fetchall()
-        return render_template(
-            "admin/job_new.html",
-            errors=errors,
-            form=request.form,
-            technicians=[dict(t) for t in technicians],
-            priorities=VALID_PRIORITIES,
-        ), 400
+        return _job_new_error_response(db, errors)
 
     # ── Single transaction: upsert customer → device → job → history ─────────
     try:
@@ -508,7 +533,7 @@ def job_new():
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (customer_id, device_make, device_model, device_serial,
-             device_passcode, device_condition),
+             encrypt_passcode(device_passcode), device_condition),
         )
         device_id = cur.lastrowid
 
@@ -542,6 +567,9 @@ def job_new():
             customer_id=customer_id,
         )
 
+    except sqlite3.IntegrityError as e:
+        db.execute("ROLLBACK")
+        return _job_new_error_response(db, [f"Could not save job (data conflict): {e}"])
     except Exception:
         db.execute("ROLLBACK")
         raise
@@ -615,6 +643,13 @@ def job_edit(job_id: int):
         db.execute("BEGIN")
         db.execute(f"UPDATE repair_jobs SET {set_clause} WHERE id = ?", values)
         db.commit()
+    except sqlite3.IntegrityError as e:
+        db.execute("ROLLBACK")
+        msg = f"Could not save changes (data conflict): {e}"
+        if _wants_json():
+            return jsonify({"errors": [msg]}), 400
+        flash(msg, "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
     except Exception:
         db.execute("ROLLBACK")
         raise
@@ -696,3 +731,447 @@ def customer_detail(customer_id: int):
         return jsonify(ctx)
 
     return render_template("admin/customer_detail.html", **ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Technician management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/technicians")
+@login_required
+def technician_list():
+    db = get_db()
+    technicians = db.execute(
+        """
+        SELECT t.*, COUNT(rj.id) AS active_jobs
+        FROM   technicians t
+        LEFT JOIN repair_jobs rj
+               ON rj.technician_id = t.id
+              AND rj.status NOT IN ('picked_up', 'cancelled', 'closed')
+        GROUP  BY t.id
+        ORDER  BY t.active DESC, t.name ASC
+        """
+    ).fetchall()
+    ctx = {"technicians": [dict(r) for r in technicians]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/technician_list.html", **ctx)
+
+
+@admin_bp.route("/technicians/new", methods=["POST"])
+@login_required
+def technician_new():
+    name  = (request.form.get("name")  or "").strip()
+    email = (request.form.get("email") or "").strip() or None
+    phone = (request.form.get("phone") or "").strip() or None
+
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("admin.technician_list"))
+
+    if phone:
+        try:
+            phone = _validate_phone(phone)
+        except ValueError as e:
+            flash(str(e), "error")
+            return redirect(url_for("admin.technician_list"))
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO technicians (name, email, phone) VALUES (?, ?, ?)",
+            (name, email, phone),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.rollback()
+        flash(f"A technician with email {email!r} already exists.", "error")
+        return redirect(url_for("admin.technician_list"))
+
+    flash(f"Technician '{name}' added.", "success")
+    return redirect(url_for("admin.technician_list"))
+
+
+@admin_bp.route("/technicians/<int:tech_id>/toggle", methods=["POST"])
+@login_required
+def technician_toggle(tech_id: int):
+    db = get_db()
+    tech = db.execute("SELECT id, active, name FROM technicians WHERE id = ?", (tech_id,)).fetchone()
+    if not tech:
+        abort(404)
+    new_active = 0 if tech["active"] else 1
+    db.execute("UPDATE technicians SET active = ? WHERE id = ?", (new_active, tech_id))
+    db.commit()
+    state = "activated" if new_active else "deactivated"
+    flash(f"Technician '{tech['name']}' {state}.", "success")
+    return redirect(url_for("admin.technician_list"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parts management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/jobs/<int:job_id>/parts/add", methods=["POST"])
+@login_required
+def part_add(job_id: int):
+    db = get_db()
+    if not db.execute("SELECT id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone():
+        abort(404)
+
+    name        = (request.form.get("name")        or "").strip()
+    part_number = (request.form.get("part_number") or "").strip() or None
+    supplier    = (request.form.get("supplier")    or "").strip() or None
+    cost_cents  = request.form.get("cost_cents", default=0, type=int)
+
+    if not name:
+        flash("Part name is required.", "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
+    if cost_cents < 0:
+        flash("Cost cannot be negative.", "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
+
+    db.execute(
+        """INSERT INTO parts (job_id, name, part_number, supplier, cost_cents)
+           VALUES (?, ?, ?, ?, ?)""",
+        (job_id, name, part_number, supplier, cost_cents),
+    )
+    db.commit()
+    flash(f"Part '{name}' added.", "success")
+    return redirect(url_for("admin.job_detail", job_id=job_id))
+
+
+@admin_bp.route("/parts/<int:part_id>/status", methods=["POST"])
+@login_required
+def part_update_status(part_id: int):
+    db = get_db()
+    part = db.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+    if not part:
+        abort(404)
+
+    new_status = (request.form.get("status") or "").strip()
+    valid = ("ordered", "received", "installed", "returned")
+    if new_status not in valid:
+        flash("Invalid part status.", "error")
+        return redirect(url_for("admin.job_detail", job_id=part["job_id"]))
+
+    db.execute("UPDATE parts SET status = ? WHERE id = ?", (new_status, part_id))
+    db.commit()
+    flash(f"Part status updated to '{new_status}'.", "success")
+    return redirect(url_for("admin.job_detail", job_id=part["job_id"]))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SMS log (global)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/sms-log")
+@login_required
+def sms_log():
+    db = get_db()
+    logs = db.execute(
+        """
+        SELECT s.*,
+               c.name  AS customer_name,
+               c.phone AS customer_phone,
+               rj.id   AS repair_job_id
+        FROM   sms_log   s
+        LEFT JOIN customers  c  ON c.id  = s.customer_id
+        LEFT JOIN repair_jobs rj ON rj.id = s.job_id
+        ORDER  BY s.sent_at DESC
+        LIMIT  200
+        """
+    ).fetchall()
+    ctx = {"logs": [dict(r) for r in logs]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/sms_log.html", **ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/invoices")
+@login_required
+def invoice_list():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT i.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               rj.status AS job_status
+        FROM   invoices i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        ORDER  BY i.created_at DESC
+        """
+    ).fetchall()
+    ctx = {"invoices": [dict(r) for r in rows]}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/invoice_list.html", **ctx)
+
+
+@admin_bp.route("/jobs/<int:job_id>/invoice/new", methods=["GET", "POST"])
+@login_required
+def invoice_new(job_id: int):
+    db = get_db()
+
+    job = db.execute(
+        """
+        SELECT rj.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               d.make, d.model
+        FROM   repair_jobs rj
+        JOIN   customers   c ON c.id = rj.customer_id
+        JOIN   devices     d ON d.id = rj.device_id
+        WHERE  rj.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+
+    if job is None:
+        abort(404)
+
+    job = dict(job)
+    wallet = get_or_create_wallet(db, job["customer_id"])
+    subtotal = job["total_cents"]
+    max_coins = calc_max_coins(subtotal, wallet["balance_coins"])
+
+    if request.method == "GET":
+        return render_template(
+            "admin/invoice_new.html",
+            job=job,
+            wallet=wallet,
+            max_coins=max_coins,
+            COIN_VALUE_CENTS=COIN_VALUE_CENTS,
+        )
+
+    # ── POST: create invoice ──────────────────────────────────────────────────
+    coins_to_apply = request.form.get("coins_applied", default=0, type=int)
+    notes = (request.form.get("notes") or "").strip() or None
+
+    if coins_to_apply < 0:
+        coins_to_apply = 0
+    if coins_to_apply > max_coins:
+        flash(f"You can apply at most {max_coins} coins on this invoice.", "error")
+        return redirect(url_for("admin.invoice_new", job_id=job_id))
+
+    discount_cents = coins_to_apply * COIN_VALUE_CENTS
+
+    try:
+        db.execute("BEGIN")
+
+        if coins_to_apply > 0:
+            spend_coins(db, job["customer_id"], coins_to_apply,
+                        reason=f"Invoice for Job #{job_id}", job_id=job_id)
+
+        cur = db.execute(
+            """
+            INSERT INTO invoices
+                (job_id, customer_id, labour_cents, parts_cents, gst_cents, pst_cents,
+                 coins_applied, discount_cents, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, job["customer_id"],
+             job["labour_cents"], job["parts_cents"],
+             job["gst_cents"],   job["pst_cents"],
+             coins_to_apply, discount_cents, notes),
+        )
+        invoice_id = cur.lastrowid
+        db.commit()
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        flash(str(e), "error")
+        return redirect(url_for("admin.invoice_new", job_id=job_id))
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+    flash(f"Invoice #{invoice_id} created.", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@admin_bp.route("/invoices/<int:invoice_id>")
+@login_required
+def invoice_detail(invoice_id: int):
+    db = get_db()
+    inv = db.execute(
+        """
+        SELECT i.*,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               d.make, d.model,
+               rj.status AS job_status
+        FROM   invoices    i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        JOIN   devices     d  ON d.id  = rj.device_id
+        WHERE  i.id = ?
+        """,
+        (invoice_id,),
+    ).fetchone()
+    if inv is None:
+        abort(404)
+
+    ctx = {"inv": dict(inv)}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/invoice_detail.html", **ctx)
+
+
+@admin_bp.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
+@login_required
+def invoice_mark_paid(invoice_id: int):
+    db = get_db()
+    inv = db.execute("SELECT id, status FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if inv is None:
+        abort(404)
+    if inv["status"] == "paid":
+        flash("Invoice is already marked paid.", "error")
+        return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+    db.execute(
+        "UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?",
+        (_now_iso(), invoice_id),
+    )
+    db.commit()
+    flash("Invoice marked as paid.", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@admin_bp.route("/invoices/<int:invoice_id>/send-sms", methods=["POST"])
+@login_required
+def invoice_send_sms(invoice_id: int):
+    db = get_db()
+    inv = db.execute(
+        """
+        SELECT i.*, c.name AS customer_name, c.phone AS customer_phone,
+               d.make, d.model
+        FROM   invoices    i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        JOIN   devices     d  ON d.id  = rj.device_id
+        WHERE  i.id = ?
+        """,
+        (invoice_id,),
+    ).fetchone()
+    if inv is None:
+        abort(404)
+
+    inv = dict(inv)
+    amount_dollars = inv["amount_due_cents"] / 100
+    body = (
+        f"Hi {inv['customer_name']}, your invoice for Job #{inv['job_id']} "
+        f"({inv['make']} {inv['model']}) is ready. "
+        f"Amount due: ${amount_dollars:.2f} CAD. "
+        f"Thank you for choosing The Crucible!"
+    )
+    result = send_sms(
+        phone=inv["customer_phone"],
+        message=body,
+        customer_id=inv["customer_id"],
+        job_id=inv["job_id"],
+    )
+    if result.get("success"):
+        flash("Invoice SMS sent.", "success")
+    else:
+        flash(f"SMS failed: {result.get('error_message', 'unknown error')}", "error")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wallet / Crucible Coin routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/wallets")
+@login_required
+def wallet_list():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT w.*, c.name AS customer_name, c.phone AS customer_phone
+        FROM   wallets    w
+        JOIN   customers  c ON c.id = w.customer_id
+        ORDER  BY w.balance_coins DESC, c.name ASC
+        """
+    ).fetchall()
+    ctx = {"wallets": [dict(r) for r in rows], "COIN_VALUE_CENTS": COIN_VALUE_CENTS}
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/wallet_list.html", **ctx)
+
+
+@admin_bp.route("/wallets/<int:customer_id>")
+@login_required
+def wallet_detail(customer_id: int):
+    db = get_db()
+
+    customer = db.execute(
+        "SELECT * FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone()
+    if customer is None:
+        abort(404)
+
+    wallet = get_or_create_wallet(db, customer_id)
+    db.commit()  # persist wallet if just created
+
+    txns = db.execute(
+        """
+        SELECT * FROM wallet_transactions
+        WHERE wallet_id = ?
+        ORDER BY created_at DESC
+        """,
+        (wallet["id"],),
+    ).fetchall()
+
+    ctx = {
+        "customer": dict(customer),
+        "wallet":   wallet,
+        "txns":     [dict(t) for t in txns],
+        "COIN_VALUE_CENTS": COIN_VALUE_CENTS,
+    }
+    if _wants_json():
+        return jsonify(ctx)
+    return render_template("admin/wallet_detail.html", **ctx)
+
+
+@admin_bp.route("/wallets/<int:customer_id>/adjust", methods=["POST"])
+@login_required
+def wallet_adjust(customer_id: int):
+    db = get_db()
+    customer = db.execute(
+        "SELECT id FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone()
+    if customer is None:
+        abort(404)
+
+    txn_type = (request.form.get("type") or "").strip()
+    amount   = request.form.get("amount", default=0, type=int)
+    reason   = (request.form.get("reason") or "").strip()
+
+    if txn_type not in ("credit", "debit"):
+        flash("Type must be 'credit' or 'debit'.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+    if amount <= 0:
+        flash("Amount must be at least 1 coin.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+    if not reason:
+        flash("Reason is required.", "error")
+        return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
+
+    try:
+        db.execute("BEGIN")
+        if txn_type == "credit":
+            add_coins(db, customer_id, amount, reason=f"[Manual] {reason}")
+        else:
+            spend_coins(db, customer_id, amount, reason=f"[Manual] {reason}")
+        db.commit()
+        flash(f"{'Credited' if txn_type == 'credit' else 'Debited'} {amount} coin(s).", "success")
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        flash(str(e), "error")
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
+
+    return redirect(url_for("admin.wallet_detail", customer_id=customer_id))
