@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Login — The Crucible{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:4rem auto">
+  <div class="card">
+    <h2 style="margin-top:0;text-align:center">🔧 The Crucible</h2>
+    <h3 style="text-align:center;color:#555;font-weight:normal;margin-top:0">Admin Login</h3>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="errors" style="{% if cat == 'success' %}background:#d1e7dd;color:#0f5132{% endif %}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Username</label>
+        <input name="username" type="text" autocomplete="username" autofocus required
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1.25rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Password</label>
+        <input name="password" type="password" autocomplete="current-password" required
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;padding:.6rem">Log In</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

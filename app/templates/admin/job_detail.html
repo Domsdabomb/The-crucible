@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Job #{{ job.id }} — The Crucible{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h2 style="margin:0">Job #{{ job.id }} — {{ job.make }} {{ job.model }}</h2>
+  <span class="badge badge-{{ job.status }}" style="font-size:1rem;padding:.3em .7em">{{ job.status.replace('_',' ') }}</span>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+
+  <!-- Customer & Device -->
+  <div class="card">
+    <h3 style="margin-top:0">Customer</h3>
+    <p><strong><a href="/admin/customers/{{ job.customer_id }}">{{ job.customer_name }}</a></strong><br>
+    📞 {{ job.customer_phone }}<br>
+    ✉ {{ job.customer_email or '—' }}</p>
+    <h3>Device</h3>
+    <p>{{ job.make }} {{ job.model }}<br>
+    S/N · IMEI: {{ job.serial_imei or '—' }}<br>
+    Passcode: {{ job.passcode or '—' }}<br>
+    Condition: {{ job.device_condition or '—' }}</p>
+  </div>
+
+  <!-- Job meta -->
+  <div class="card">
+    <h3 style="margin-top:0">Details</h3>
+    <table style="width:auto">
+      <tr><td style="padding:.2rem .5rem"><strong>Priority</strong></td><td><span class="badge badge-{{ job.priority }}">{{ job.priority }}</span></td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Technician</strong></td><td>{{ job.technician_name or '—' }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Promised</strong></td><td>{{ job.promised_date or '—' }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Created</strong></td><td>{{ job.created_at[:10] }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Updated</strong></td><td>{{ job.updated_at[:10] }}</td></tr>
+    </table>
+    <h3>Pricing (CAD)</h3>
+    <table style="width:auto">
+      <tr><td style="padding:.2rem .5rem">Labour</td><td>${{ "%.2f"|format(job.labour_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">Parts</td><td>${{ "%.2f"|format(job.parts_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">GST (5%)</td><td>${{ "%.2f"|format(job.gst_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">PST (7%)</td><td>${{ "%.2f"|format(job.pst_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Total</strong></td><td><strong>${{ "%.2f"|format(job.total_cents/100) }}</strong></td></tr>
+      <tr><td style="padding:.2rem .5rem">Deposit</td><td>${{ "%.2f"|format(job.deposit_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem">Quoted</td><td>${{ "%.2f"|format(job.quoted_cents/100) }}</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- Notes -->
+<div class="card">
+  <h3 style="margin-top:0">Notes</h3>
+  <p><strong>Description:</strong> {{ job.description or '—' }}</p>
+  <p><strong>Diagnosis:</strong> {{ job.diagnosis_notes or '—' }}</p>
+</div>
+
+<!-- Status Transition -->
+{% if allowed_transitions %}
+<div class="card">
+  <h3 style="margin-top:0">Update Status</h3>
+  <form method="post" action="/admin/jobs/{{ job.id }}/status" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">New Status</label>
+      <select name="status" required>
+        {% for s in allowed_transitions %}
+        <option value="{{ s }}">{{ s.replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Changed By</label>
+      <input type="text" name="changed_by" placeholder="Your name" required>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Note (optional)</label>
+      <input type="text" name="note" placeholder="Reason or comment" style="width:200px">
+    </div>
+    <button type="submit" class="btn btn-primary">Update Status</button>
+  </form>
+</div>
+{% else %}
+<div class="card" style="border-left:4px solid #6c757d">
+  <p style="margin:0;color:#6c757d">This job is in a terminal state (<strong>{{ job.status }}</strong>) and cannot be advanced further.</p>
+</div>
+{% endif %}
+
+<!-- Invoice -->
+<div class="card">
+  <h3 style="margin-top:0">Invoice</h3>
+  <p style="margin:.25rem 0 .75rem;color:#666">Create an invoice to apply Crucible Coins and record payment.</p>
+  <a href="/admin/jobs/{{ job.id }}/invoice/new" class="btn btn-primary">Create Invoice</a>
+  <a href="/admin/invoices" class="btn btn-secondary" style="margin-left:.5rem">All Invoices</a>
+</div>
+
+<!-- Edit form -->
+<div class="card">
+  <h3 style="margin-top:0">Edit Job</h3>
+  <form method="post" action="/admin/jobs/{{ job.id }}/edit" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Priority</label>
+      <select name="priority">
+        {% for p in ['low','normal','high','urgent'] %}
+        <option value="{{ p }}" {% if job.priority == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Technician</label>
+      <select name="technician_id">
+        <option value="">— Unassigned —</option>
+        {% for t in technicians %}
+        <option value="{{ t.id }}" {% if job.technician_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Promised Date</label>
+      <input type="date" name="promised_date" value="{{ job.promised_date or '' }}">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Deposit (cents)</label>
+      <input type="number" name="deposit_cents" value="{{ job.deposit_cents }}" min="0">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Labour (cents)</label>
+      <input type="number" name="labour_cents" value="{{ job.labour_cents }}" min="0">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Parts (cents)</label>
+      <input type="number" name="parts_cents" value="{{ job.parts_cents }}" min="0">
+    </div>
+    <div style="grid-column:1/-1">
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Description</label>
+      <textarea name="description" rows="2" style="width:100%">{{ job.description or '' }}</textarea>
+    </div>
+    <div style="grid-column:1/-1">
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Diagnosis Notes</label>
+      <textarea name="diagnosis_notes" rows="2" style="width:100%">{{ job.diagnosis_notes or '' }}</textarea>
+    </div>
+    <div style="grid-column:1/-1">
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+  </form>
+</div>
+
+<!-- Parts -->
+<div class="card">
+  <h3 style="margin-top:0">Parts ({{ parts|length }})</h3>
+  {% if parts %}
+  <table style="margin-bottom:1rem">
+    <thead><tr><th>Name</th><th>Part #</th><th>Supplier</th><th>Cost</th><th>Status</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+    {% for p in parts %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td>{{ p.part_number or '—' }}</td>
+      <td>{{ p.supplier or '—' }}</td>
+      <td>${{ "%.2f"|format(p.cost_cents/100) }}</td>
+      <td><span class="badge badge-{{ p.status }}">{{ p.status }}</span></td>
+      <td>{{ p.created_at[:10] }}</td>
+      <td>
+        <form method="post" action="/admin/parts/{{ p.id }}/status" style="display:flex;gap:.3rem">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <select name="status" style="font-size:.8rem;padding:.2rem">
+            {% for s in ['ordered','received','installed','returned'] %}
+            <option value="{{ s }}" {% if p.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-secondary" style="font-size:.75rem;padding:.2rem .5rem">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;margin-bottom:1rem">No parts logged.</p>
+  {% endif %}
+
+  <h4 style="margin:.5rem 0 .5rem">Add Part</h4>
+  <form method="post" action="/admin/jobs/{{ job.id }}/parts/add" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Name *</label>
+      <input name="name" type="text" required placeholder="e.g. Screen assembly" style="padding:.35rem;border:1px solid #ccc;border-radius:4px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Part #</label>
+      <input name="part_number" type="text" placeholder="optional" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:120px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Supplier</label>
+      <input name="supplier" type="text" placeholder="optional" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:120px">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Cost (cents)</label>
+      <input name="cost_cents" type="number" value="0" min="0" style="padding:.35rem;border:1px solid #ccc;border-radius:4px;width:90px">
+    </div>
+    <button type="submit" class="btn btn-primary">Add Part</button>
+  </form>
+</div>
+
+<!-- Status History -->
+<div class="card">
+  <h3 style="margin-top:0">Status History</h3>
+  <table>
+    <thead><tr><th>From</th><th>To</th><th>By</th><th>Note</th><th>When</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.old_status or '(new)' }}</td>
+      <td><span class="badge badge-{{ h.new_status }}">{{ h.new_status.replace('_',' ') }}</span></td>
+      <td>{{ h.changed_by }}</td>
+      <td>{{ h.note or '—' }}</td>
+      <td>{{ h.changed_at[:16].replace('T',' ') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- SMS Log -->
+<div class="card">
+  <h3 style="margin-top:0">SMS Log</h3>
+  {% if sms_logs %}
+  <table>
+    <thead><tr><th>Status</th><th>Message</th><th>Provider ID</th><th>Error</th><th>Sent</th></tr></thead>
+    <tbody>
+    {% for s in sms_logs %}
+    <tr>
+      <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
+      <td style="max-width:300px;white-space:pre-wrap">{{ s.message_body }}</td>
+      <td>{{ s.provider_message_id or '—' }}</td>
+      <td style="color:#dc3545">{{ s.error_message or '—' }}</td>
+      <td>{{ s.sent_at[:16].replace('T',' ') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999">No SMS messages sent for this job.</p>
+  {% endif %}
+</div>
+{% endblock %}

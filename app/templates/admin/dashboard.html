@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — The Crucible{% endblock %}
+{% block content %}
+<h2>Dashboard</h2>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;margin-bottom:1.5rem">
+  {% for status in all_statuses %}
+  <div class="card" style="text-align:center;padding:.75rem">
+    <div style="font-size:1.6rem;font-weight:700">{{ status_counts.get(status, 0) }}</div>
+    <div class="badge badge-{{ status }}" style="margin-top:.25rem">{{ status.replace('_',' ') }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if overdue %}
+<div class="card" style="border-left:4px solid #dc3545">
+  <h3 style="margin-top:0;color:#842029">⚠ Overdue Jobs ({{ overdue|length }})</h3>
+  <table>
+    <thead><tr><th>Job #</th><th>Customer</th><th>Device</th><th>Promised</th><th>Priority</th></tr></thead>
+    <tbody>
+    {% for j in overdue %}
+    <tr>
+      <td><a href="/admin/jobs/{{ j.id }}">#{{ j.id }}</a></td>
+      <td>{{ j.customer_name }}</td>
+      <td>{{ j.make }} {{ j.model }}</td>
+      <td>{{ j.promised_date }}</td>
+      <td><span class="badge badge-{{ j.priority }}">{{ j.priority }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0">Active Jobs</h3>
+  <table>
+    <thead><tr><th>Job #</th><th>Customer</th><th>Device</th><th>Status</th><th>Priority</th><th>Tech</th><th>Created</th></tr></thead>
+    <tbody>
+    {% for j in active_feed %}
+    <tr>
+      <td><a href="/admin/jobs/{{ j.id }}">#{{ j.id }}</a></td>
+      <td>{{ j.customer_name }}</td>
+      <td>{{ j.make }} {{ j.model }}</td>
+      <td><span class="badge badge-{{ j.status }}">{{ j.status.replace('_',' ') }}</span></td>
+      <td><span class="badge badge-{{ j.priority }}">{{ j.priority }}</span></td>
+      <td>{{ j.technician_name or '—' }}</td>
+      <td>{{ j.created_at[:10] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" style="text-align:center;color:#999">No active jobs.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Invoices — The Crucible{% endblock %}
+{% block content %}
+<h2>Invoices <span style="color:#999;font-weight:normal;font-size:.8em">({{ invoices|length }})</span></h2>
+
+<div class="card">
+  {% if invoices %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Customer</th>
+        <th>Job</th>
+        <th>Subtotal</th>
+        <th>Coins Applied</th>
+        <th>Amount Due</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for inv in invoices %}
+    <tr>
+      <td>{{ inv.id }}</td>
+      <td>{{ inv.customer_name }}</td>
+      <td><a href="/admin/jobs/{{ inv.job_id }}">#{{ inv.job_id }}</a></td>
+      <td>${{ "%.2f"|format(inv.subtotal_cents/100) }}</td>
+      <td>{{ inv.coins_applied }} 🪙</td>
+      <td><strong>${{ "%.2f"|format(inv.amount_due_cents/100) }}</strong></td>
+      <td>
+        {% if inv.status == 'paid' %}
+        <span class="badge badge-diagnosed">paid</span>
+        {% else %}
+        <span class="badge badge-awaiting_parts">unpaid</span>
+        {% endif %}
+      </td>
+      <td style="white-space:nowrap">{{ inv.created_at[:10] }}</td>
+      <td><a href="/admin/invoices/{{ inv.id }}" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">View</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;margin:0">No invoices yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

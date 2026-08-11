@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Jobs — The Crucible{% endblock %}
+{% block content %}
+<h2>Jobs</h2>
+
+<div class="card">
+  <form method="get" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Status</label>
+      <select name="status">
+        <option value="">All</option>
+        {% for s in all_statuses %}
+        <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Priority</label>
+      <select name="priority">
+        <option value="">All</option>
+        {% for p in all_priorities %}
+        <option value="{{ p }}" {% if filters.priority == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Technician</label>
+      <select name="tech_id">
+        <option value="">All</option>
+        {% for t in technicians %}
+        <option value="{{ t.id }}" {% if filters.tech_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">From</label>
+      <input type="date" name="date_from" value="{{ filters.date_from or '' }}">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">To</label>
+      <input type="date" name="date_to" value="{{ filters.date_to or '' }}">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Search</label>
+      <input type="text" name="search" placeholder="Name, phone, device, #…" value="{{ filters.search or '' }}" style="width:180px">
+    </div>
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="/admin/jobs" class="btn btn-secondary">Clear</a>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+    <strong>{{ jobs|length }} job(s)</strong>
+    <a href="/admin/jobs/new" class="btn btn-primary">+ New Job</a>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Job #</th><th>Customer</th><th>Device</th><th>Status</th><th>Priority</th><th>Tech</th><th>Promised</th><th>Total</th><th>Updated</th></tr>
+    </thead>
+    <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td><a href="/admin/jobs/{{ j.id }}">#{{ j.id }}</a></td>
+      <td>{{ j.customer_name }}</td>
+      <td>{{ j.make }} {{ j.model }}</td>
+      <td><span class="badge badge-{{ j.status }}">{{ j.status.replace('_',' ') }}</span></td>
+      <td><span class="badge badge-{{ j.priority }}">{{ j.priority }}</span></td>
+      <td>{{ j.technician_name or '—' }}</td>
+      <td>{{ j.promised_date or '—' }}</td>
+      <td>${{ "%.2f"|format(j.total_cents / 100) }}</td>
+      <td>{{ j.updated_at[:10] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" style="text-align:center;color:#999">No jobs match the current filters.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
