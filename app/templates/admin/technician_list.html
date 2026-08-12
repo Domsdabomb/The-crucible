@@ -31,6 +31,7 @@
     <h3 style="margin-top:0">All Technicians ({{ technicians|length }})</h3>
     <table>
       <thead>
+        <tr><th>Name</th><th>Email</th><th>Active Jobs</th><th>Status</th><th></th></tr>
         <tr><th>Name</th><th>Email</th><th>Active Jobs</th><th>Status</th><th>Login</th><th></th></tr>
       </thead>
       <tbody>
@@ -63,6 +64,7 @@
         </td>
       </tr>
       {% else %}
+      <tr><td colspan="5" style="text-align:center;color:#999">No technicians yet.</td></tr>
       <tr><td colspan="6" style="text-align:center;color:#999">No technicians yet.</td></tr>
       {% endfor %}
       </tbody>

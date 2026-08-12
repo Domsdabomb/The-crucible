@@ -26,6 +26,7 @@ from flask import (
 )
 
 from app.db import get_db
+from app.services.auth import login_required
 from app.services.auth import login_required, admin_required, create_admin
 from app.services.crypto import encrypt_passcode, decrypt_passcode
 from app.services.sms_service import sms_intake, sms_ready, send_sms
@@ -330,6 +331,9 @@ def job_detail(job_id: int):
         abort(404)
     if not _can_access_job(job["technician_id"]):
         abort(403)
+
+    job = dict(job)
+    job["passcode"] = decrypt_passcode(job["passcode"])
 
     job = dict(job)
     job["passcode"] = decrypt_passcode(job["passcode"])
@@ -763,11 +767,13 @@ def customer_detail(customer_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/technicians")
+@login_required
 @admin_required
 def technician_list():
     db = get_db()
     technicians = db.execute(
         """
+        SELECT t.*, COUNT(rj.id) AS active_jobs
         SELECT t.*, COUNT(DISTINCT rj.id) AS active_jobs, a.username AS login_username
         FROM   technicians t
         LEFT JOIN repair_jobs rj
@@ -785,6 +791,7 @@ def technician_list():
 
 
 @admin_bp.route("/technicians/new", methods=["POST"])
+@login_required
 @admin_required
 def technician_new():
     name  = (request.form.get("name")  or "").strip()
@@ -811,6 +818,7 @@ def technician_new():
         )
         db.commit()
     except sqlite3.IntegrityError:
+        db.rollback()
         db.execute("ROLLBACK")
         flash(f"A technician with email {email!r} already exists.", "error")
         return redirect(url_for("admin.technician_list"))
@@ -820,6 +828,7 @@ def technician_new():
 
 
 @admin_bp.route("/technicians/<int:tech_id>/toggle", methods=["POST"])
+@login_required
 @admin_required
 def technician_toggle(tech_id: int):
     db = get_db()
@@ -893,6 +902,8 @@ def technician_create_login(tech_id: int):
 @login_required
 def part_add(job_id: int):
     db = get_db()
+    if not db.execute("SELECT id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone():
+        abort(404)
     job = db.execute("SELECT id, technician_id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone()
     if not job:
         abort(404)
@@ -951,6 +962,7 @@ def part_update_status(part_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/sms-log")
+@login_required
 @admin_required
 def sms_log():
     db = get_db()
@@ -978,6 +990,7 @@ def sms_log():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/invoices")
+@login_required
 @admin_required
 def invoice_list():
     db = get_db()
@@ -999,6 +1012,7 @@ def invoice_list():
 
 
 @admin_bp.route("/jobs/<int:job_id>/invoice/new", methods=["GET", "POST"])
+@login_required
 @admin_required
 def invoice_new(job_id: int):
     db = get_db()
@@ -1079,6 +1093,7 @@ def invoice_new(job_id: int):
 
 
 @admin_bp.route("/invoices/<int:invoice_id>")
+@login_required
 @admin_required
 def invoice_detail(invoice_id: int):
     db = get_db()
@@ -1106,6 +1121,7 @@ def invoice_detail(invoice_id: int):
 
 
 @admin_bp.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
+@login_required
 @admin_required
 def invoice_mark_paid(invoice_id: int):
     db = get_db()
@@ -1126,6 +1142,7 @@ def invoice_mark_paid(invoice_id: int):
 
 
 @admin_bp.route("/invoices/<int:invoice_id>/send-sms", methods=["POST"])
+@login_required
 @admin_required
 def invoice_send_sms(invoice_id: int):
     db = get_db()
@@ -1170,6 +1187,7 @@ def invoice_send_sms(invoice_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/wallets")
+@login_required
 @admin_required
 def wallet_list():
     db = get_db()
@@ -1178,7 +1196,7 @@ def wallet_list():
         SELECT w.*, c.name AS customer_name, c.phone AS customer_phone
         FROM   wallets    w
         JOIN   customers  c ON c.id = w.customer_id
-        ORDER  BY w.balance_coins DESC, c.name ASC
+  ORDER  BY w.balance_coins DESC, c.name ASC
         """
     ).fetchall()
     ctx = {"wallets": [dict(r) for r in rows], "COIN_VALUE_CENTS": COIN_VALUE_CENTS}
@@ -1188,6 +1206,7 @@ def wallet_list():
 
 
 @admin_bp.route("/wallets/<int:customer_id>")
+@login_required
 @admin_required
 def wallet_detail(customer_id: int):
     db = get_db()
@@ -1222,6 +1241,7 @@ def wallet_detail(customer_id: int):
 
 
 @admin_bp.route("/wallets/<int:customer_id>/adjust", methods=["POST"])
+@login_required
 @admin_required
 def wallet_adjust(customer_id: int):
     db = get_db()
