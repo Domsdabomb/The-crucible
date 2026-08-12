@@ -41,14 +41,18 @@
 <nav>
   <strong style="font-size:1.1rem">🔧 The Crucible</strong>
   {% if session.get('admin_id') %}
+  {% if session.get('admin_role') == 'admin' %}
   <a href="/admin/">Dashboard</a>
+  {% endif %}
   <a href="/admin/jobs">Jobs</a>
+  {% if session.get('admin_role') == 'admin' %}
   <a href="/admin/jobs/new">+ New Job</a>
   <a href="/admin/customers">Customers</a>
   <a href="/admin/technicians">Technicians</a>
   <a href="/admin/sms-log">SMS Log</a>
   <a href="/admin/invoices">Invoices</a>
   <a href="/admin/wallets">Coins 🪙</a>
+  {% endif %}
   <span style="flex:1"></span>
   <span style="color:#aaa;font-size:.85rem">{{ session.get('admin_username') }}</span>
   <a href="/auth/logout" style="color:#f88">Logout</a>

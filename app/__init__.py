@@ -65,7 +65,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/")
     def index():
         if "admin_id" in session:
-            return redirect(url_for("admin.dashboard"))
+            if session.get("admin_role") == "admin":
+                return redirect(url_for("admin.dashboard"))
+            return redirect(url_for("admin.job_list"))
         return redirect(url_for("auth.login"))
 
     return app

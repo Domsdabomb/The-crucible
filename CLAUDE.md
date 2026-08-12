@@ -27,7 +27,7 @@ the-crucible/
 │   │   ├── __init__.py     # Blueprint: track_bp, url_prefix="/track"
 │   │   └── routes.py       # Public, unauthenticated job-status lookup (phone + ticket #)
 │   ├── services/
-│   │   ├── auth.py          # Password hashing (werkzeug PBKDF2), login_required, lockout tracking
+│   │   ├── auth.py          # Password hashing (werkzeug PBKDF2), login_required, admin_required, lockout tracking
 │   │   ├── crypto.py        # Fernet encrypt/decrypt for device passcodes at rest
 │   │   ├── sms_service.py   # SMS stub: send_sms, sms_intake, sms_ready
 │   │   └── wallet.py        # Crucible Coin loyalty wallet: earn/spend/redeem logic
@@ -42,7 +42,7 @@ the-crucible/
 │           ├── dashboard.html
 │           ├── job_list.html / job_detail.html / job_new.html
 │           ├── customer_list.html / customer_detail.html
-│           ├── technician_list.html
+│           ├── technician_list.html / technician_create_login.html
 │           ├── invoice_list.html / invoice_detail.html / invoice_new.html
 │           ├── wallet_list.html / wallet_detail.html
 │           └── sms_log.html
@@ -192,38 +192,41 @@ python run.py                  # dev server on http://127.0.0.1:5000
 
 ## Route Map
 
-Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); auth routes are on `auth_bp` (prefix `/auth`); the public tracker is on `track_bp` (prefix `/track`). All admin routes require login; `/track` is intentionally unauthenticated. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
+Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); auth routes are on `auth_bp` (prefix `/auth`); the public tracker is on `track_bp` (prefix `/track`). `/track` is intentionally unauthenticated; everything else requires login. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
 
-| Method | Route | Function | Description |
-|---|---|---|---|
-| GET/POST | `/auth/login` | `login` | Login form; redirects to setup if no admin exists; locks account after repeated failures |
-| GET | `/auth/logout` | `logout` | Clears session |
-| GET/POST | `/auth/setup` | `setup` | First-run admin account creation |
-| GET/POST | `/track/` | `track` | Public job-status lookup by phone + ticket number (no login) |
-| GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority |
-| GET | `/admin/jobs` | `job_list` | Filterable list: status, priority, tech, date range, full-text search |
-| GET | `/admin/jobs/<id>` | `job_detail` | Full ticket: device, parts, status history, SMS log |
-| GET/POST | `/admin/jobs/new` | `job_new` | Intake form: upserts customer, creates device + job in one transaction |
-| POST | `/admin/jobs/<id>/status` | `job_update_status` | State transition with machine validation; auto-SMS on `ready`, auto-coins on `picked_up` |
-| POST | `/admin/jobs/<id>/edit` | `job_edit` | Update notes, pricing, promised date, technician; auto-calculates GST+PST |
-| GET | `/admin/customers` | `customer_list` | All customers with job/SMS counts |
-| GET | `/admin/customers/<id>` | `customer_detail` | Full device and job history for a customer |
-| GET | `/admin/technicians` | `technician_list` | Technician roster with active job counts |
-| POST | `/admin/technicians/new` | `technician_new` | Add a technician |
-| POST | `/admin/technicians/<id>/toggle` | `technician_toggle` | Activate/deactivate |
-| POST | `/admin/jobs/<id>/parts/add` | `part_add` | Add a part to a job |
-| POST | `/admin/parts/<id>/status` | `part_update_status` | Update part lifecycle status |
-| GET | `/admin/sms-log` | `sms_log` | Global SMS log (last 200) |
-| GET | `/admin/invoices` | `invoice_list` | All invoices |
-| GET/POST | `/admin/jobs/<id>/invoice/new` | `invoice_new` | Create an invoice from a job, optionally applying coins |
-| GET | `/admin/invoices/<id>` | `invoice_detail` | Invoice detail |
-| POST | `/admin/invoices/<id>/mark-paid` | `invoice_mark_paid` | Mark invoice paid |
-| POST | `/admin/invoices/<id>/send-sms` | `invoice_send_sms` | SMS the invoice amount to the customer |
-| GET | `/admin/wallets` | `wallet_list` | All customer wallets by balance |
-| GET | `/admin/wallets/<customer_id>` | `wallet_detail` | Wallet + transaction ledger for a customer |
-| POST | `/admin/wallets/<customer_id>/adjust` | `wallet_adjust` | Manual credit/debit with a reason |
+**Access** column: **Admin** = `@admin_required`, 403s technician accounts. **Own job** = `@login_required` plus an ownership check (`_can_access_job`) — technicians only pass for jobs assigned to their own `technicians` row; admins always pass.
 
-Root `/` redirects based on login state (defined in `app/__init__.py`).
+| Method | Route | Function | Access | Description |
+|---|---|---|---|---|
+| GET/POST | `/auth/login` | `login` | Public | Login form; redirects to setup if no admin exists; locks account after repeated failures |
+| GET | `/auth/logout` | `logout` | Any login | Clears session |
+| GET/POST | `/auth/setup` | `setup` | Public | First-run admin account creation (always role='admin') |
+| GET/POST | `/track/` | `track` | Public | Public job-status lookup by phone + ticket number (no login) |
+| GET | `/admin/` | `dashboard` | Admin | Pipeline counts, overdue jobs, active job feed sorted by priority |
+| GET | `/admin/jobs` | `job_list` | Any login | Filterable list; technicians are force-filtered to their own jobs regardless of query params |
+| GET | `/admin/jobs/<id>` | `job_detail` | Own job | Full ticket: device, parts, status history, SMS log |
+| GET/POST | `/admin/jobs/new` | `job_new` | Admin | Intake form: upserts customer, creates device + job in one transaction |
+| POST | `/admin/jobs/<id>/status` | `job_update_status` | Own job | State transition with machine validation; auto-SMS on `ready`, auto-coins on `picked_up` |
+| POST | `/admin/jobs/<id>/edit` | `job_edit` | Own job | Update notes, pricing, promised date, technician; auto-calculates GST+PST |
+| GET | `/admin/customers` | `customer_list` | Admin | All customers with job/SMS counts |
+| GET | `/admin/customers/<id>` | `customer_detail` | Admin | Full device and job history for a customer |
+| GET | `/admin/technicians` | `technician_list` | Admin | Technician roster with active job counts and login status |
+| POST | `/admin/technicians/new` | `technician_new` | Admin | Add a technician |
+| POST | `/admin/technicians/<id>/toggle` | `technician_toggle` | Admin | Activate/deactivate |
+| GET/POST | `/admin/technicians/<id>/create-login` | `technician_create_login` | Admin | Create a role='technician' login linked to this technician (one login per technician) |
+| POST | `/admin/jobs/<id>/parts/add` | `part_add` | Own job | Add a part to a job |
+| POST | `/admin/parts/<id>/status` | `part_update_status` | Own job | Update part lifecycle status |
+| GET | `/admin/sms-log` | `sms_log` | Admin | Global SMS log (last 200) |
+| GET | `/admin/invoices` | `invoice_list` | Admin | All invoices |
+| GET/POST | `/admin/jobs/<id>/invoice/new` | `invoice_new` | Admin | Create an invoice from a job, optionally applying coins |
+| GET | `/admin/invoices/<id>` | `invoice_detail` | Admin | Invoice detail |
+| POST | `/admin/invoices/<id>/mark-paid` | `invoice_mark_paid` | Admin | Mark invoice paid |
+| POST | `/admin/invoices/<id>/send-sms` | `invoice_send_sms` | Admin | SMS the invoice amount to the customer |
+| GET | `/admin/wallets` | `wallet_list` | Admin | All customer wallets by balance |
+| GET | `/admin/wallets/<customer_id>` | `wallet_detail` | Admin | Wallet + transaction ledger for a customer |
+| POST | `/admin/wallets/<customer_id>/adjust` | `wallet_adjust` | Admin | Manual credit/debit with a reason |
+
+Root `/` redirects based on login state and role (admins → dashboard, technicians → their job list) (defined in `app/__init__.py`).
 
 ---
 
@@ -259,6 +262,14 @@ An invoice snapshots a job's `labour_cents` / `parts_cents` / `gst_cents` / `pst
 - A failed login increments the counter; hitting the threshold sets `locked_until` and resets the counter. A successful login clears both.
 - `locked_until` is an ISO-8601 UTC string compared lexicographically against `now` — same convention as other timestamp columns in this codebase, no datetime parsing needed.
 - This is account-level only, not IP-based — an attacker who doesn't know a valid username isn't throttled (there's no row to increment).
+
+### Role Separation (`app/services/auth.py`, `app/admin/routes.py`)
+- `admins.role` is `'admin'` (full access) or `'technician'` (jobs assigned to them only). `admins.technician_id` links a technician-role account to its `technicians` row; it's `NULL` for admins and `UNIQUE` (one login per technician).
+- `@admin_required` (in `app/services/auth.py`) gates anything outside "view/update jobs assigned to me": customers, other technicians' accounts, SMS log, invoices, wallets, job intake.
+- `_can_access_job()` (in `app/admin/routes.py`) is the ownership check for job-scoped routes (`job_detail`, `job_update_status`, `job_edit`, `part_add`, `part_update_status`): admins always pass; technicians pass only if `repair_jobs.technician_id` matches their own.
+- `job_list` force-overrides any submitted `tech_id` filter for technician-role sessions (fails closed to `-1`, matching no job, if a technician session somehow has no linked `technician_id`) — the client's filter selection can't be used to browse other technicians' jobs.
+- The bootstrap account created via `/auth/setup` is always `role='admin'`. Additional technician logins are created by an existing admin from `/admin/technicians` → "Create Login".
+- Session carries `admin_role` and `admin_technician_id` alongside `admin_id`/`admin_username`, set at login/setup — routes check these rather than re-querying the DB every request.
 
 ### Public Job Tracking (`app/track/routes.py`)
 - Requires **both** the customer's phone number and their ticket number (`repair_jobs.id`) — a phone number alone can't be used to browse someone's repair history.
@@ -329,13 +340,13 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 | Loyalty coins | Full wallet system | Ported: `wallets` / `wallet_transactions`, earn-on-pickup, redeem-on-invoice |
 | Invoicing | Ported from v1 | `invoices` table, snapshots job pricing, coin discounts |
 | Customer self-serve tracking | `/track` route | Ported: public phone + ticket lookup, no login |
+| Account tiers | Admin only | `admin` and `technician` roles; technicians scoped to their own jobs |
 
 ---
 
 ## Known TODOs (from codebase)
 
 - **Real SMS provider** — `sms_service.py` points at a placeholder URL; wire up real credentials via `INVOICETOSMS_API_KEY`.
-- **Single account tier** — no per-technician logins or role separation; every admin account has full access.
 
 ## CI
 

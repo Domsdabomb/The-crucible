@@ -31,7 +31,7 @@
     <h3 style="margin-top:0">All Technicians ({{ technicians|length }})</h3>
     <table>
       <thead>
-        <tr><th>Name</th><th>Email</th><th>Active Jobs</th><th>Status</th><th></th></tr>
+        <tr><th>Name</th><th>Email</th><th>Active Jobs</th><th>Status</th><th>Login</th><th></th></tr>
       </thead>
       <tbody>
       {% for t in technicians %}
@@ -47,6 +47,13 @@
           {% endif %}
         </td>
         <td>
+          {% if t.login_username %}
+          <span style="color:#666">{{ t.login_username }}</span>
+          {% else %}
+          <a href="/admin/technicians/{{ t.id }}/create-login" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">Create Login</a>
+          {% endif %}
+        </td>
+        <td>
           <form method="post" action="/admin/technicians/{{ t.id }}/toggle" style="display:inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-secondary" style="font-size:.8rem;padding:.2rem .6rem">
@@ -56,7 +63,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:#999">No technicians yet.</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:#999">No technicians yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

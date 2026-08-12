@@ -226,10 +226,16 @@ CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 -- ─────────────────────────────────────────────
 -- 11. ADMINS
 -- ─────────────────────────────────────────────
+-- role='admin' has full access; role='technician' can only view/update jobs
+-- assigned to their linked technicians row (see app/services/auth.admin_required
+-- and app/admin/routes._can_access_job).
 CREATE TABLE IF NOT EXISTS admins (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     username        TEXT    NOT NULL UNIQUE,
     password_hash   TEXT    NOT NULL,             -- werkzeug generate_password_hash() (PBKDF2-SHA256)
+    role            TEXT    NOT NULL DEFAULT 'admin'
+                    CHECK (role IN ('admin', 'technician')),
+    technician_id   INTEGER UNIQUE REFERENCES technicians (id) ON DELETE CASCADE,
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until    TEXT,                         -- ISO-8601 UTC; NULL when not locked
     created_at      TEXT    NOT NULL

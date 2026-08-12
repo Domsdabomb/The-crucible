@@ -23,6 +23,7 @@
         {% endfor %}
       </select>
     </div>
+    {% if session.get('admin_role') == 'admin' %}
     <div>
       <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Technician</label>
       <select name="tech_id">
@@ -32,6 +33,7 @@
         {% endfor %}
       </select>
     </div>
+    {% endif %}
     <div>
       <label style="display:block;font-size:.8rem;margin-bottom:.2rem">From</label>
       <input type="date" name="date_from" value="{{ filters.date_from or '' }}">
@@ -52,7 +54,9 @@
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
     <strong>{{ jobs|length }} job(s)</strong>
+    {% if session.get('admin_role') == 'admin' %}
     <a href="/admin/jobs/new" class="btn btn-primary">+ New Job</a>
+    {% endif %}
   </div>
   <table>
     <thead>

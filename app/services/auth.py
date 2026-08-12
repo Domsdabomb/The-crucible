@@ -6,7 +6,7 @@ failed-login lockout tracking.
 import functools
 from datetime import datetime, timedelta, timezone
 
-from flask import session, redirect, url_for, flash, request
+from flask import abort, session, redirect, url_for, flash, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.db import get_db
@@ -34,11 +34,13 @@ def admin_exists() -> bool:
     return get_db().execute("SELECT COUNT(*) FROM admins").fetchone()[0] > 0
 
 
-def create_admin(username: str, password: str) -> None:
+def create_admin(username: str, password: str, role: str = "admin",
+                  technician_id: int | None = None) -> None:
     db = get_db()
     db.execute(
-        "INSERT INTO admins (username, password_hash) VALUES (?, ?)",
-        (username, hash_password(password)),
+        "INSERT INTO admins (username, password_hash, role, technician_id) "
+        "VALUES (?, ?, ?, ?)",
+        (username, hash_password(password), role, technician_id),
     )
     db.commit()
 
@@ -100,5 +102,22 @@ def login_required(f):
         if "admin_id" not in session:
             flash("Please log in to continue.", "error")
             return redirect(url_for("auth.login", next=request.path))
+        return f(*args, **kwargs)
+    return wrapped
+
+
+def admin_required(f):
+    """Decorator: like login_required, but 403s technician-role accounts.
+
+    Use on routes that touch customer financials, invoices, wallets, or
+    other accounts — anything outside "view/update jobs assigned to me".
+    """
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        if "admin_id" not in session:
+            flash("Please log in to continue.", "error")
+            return redirect(url_for("auth.login", next=request.path))
+        if session.get("admin_role") != "admin":
+            abort(403)
         return f(*args, **kwargs)
     return wrapped
