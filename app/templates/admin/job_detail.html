@@ -11,7 +11,7 @@
   <!-- Customer & Device -->
   <div class="card">
     <h3 style="margin-top:0">Customer</h3>
-    <p><strong><a href="/admin/customers/{{ job.customer_id }}">{{ job.customer_name }}</a></strong><br>
+    <p><strong>{% if session.get('admin_role') == 'admin' %}<a href="/admin/customers/{{ job.customer_id }}">{{ job.customer_name }}</a>{% else %}{{ job.customer_name }}{% endif %}</strong><br>
     📞 {{ job.customer_phone }}<br>
     ✉ {{ job.customer_email or '—' }}</p>
     <h3>Device</h3>
@@ -82,6 +82,7 @@
 </div>
 {% endif %}
 
+{% if session.get('admin_role') == 'admin' %}
 <!-- Invoice -->
 <div class="card">
   <h3 style="margin-top:0">Invoice</h3>
@@ -89,6 +90,7 @@
   <a href="/admin/jobs/{{ job.id }}/invoice/new" class="btn btn-primary">Create Invoice</a>
   <a href="/admin/invoices" class="btn btn-secondary" style="margin-left:.5rem">All Invoices</a>
 </div>
+{% endif %}
 
 <!-- Edit form -->
 <div class="card">

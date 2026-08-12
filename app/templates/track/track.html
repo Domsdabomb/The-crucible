@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Track Your Repair — The Crucible{% endblock %}
+{% block content %}
+<div style="max-width:500px;margin:2rem auto">
+  <div class="card">
+    <h2 style="margin-top:0">🔍 Track Your Repair</h2>
+    <p style="color:#666">Enter the phone number and ticket number from your intake receipt.</p>
+
+    {% if error %}
+    <div class="errors">{{ error }}</div>
+    {% endif %}
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Phone Number</label>
+        <input name="phone" type="text" placeholder="+12505550100" required
+               value="{{ request.form.phone or '' }}"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1.25rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Ticket Number</label>
+        <input name="ticket" type="text" placeholder="e.g. 42" required
+               value="{{ request.form.ticket or '' }}"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;padding:.6rem">Check Status</button>
+    </form>
+  </div>
+
+  {% if job %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+      <h3 style="margin:0">Ticket #{{ job.id }} — {{ job.make }} {{ job.model }}</h3>
+      <span class="badge badge-{{ job.status }}">{{ job.status.replace('_',' ') }}</span>
+    </div>
+    <table style="width:auto">
+      <tr><td style="padding:.2rem .5rem"><strong>Promised Date</strong></td><td>{{ job.promised_date or 'Not set yet' }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Estimated Cost</strong></td><td>${{ "%.2f"|format(job.quoted_cents/100) }}</td></tr>
+      <tr><td style="padding:.2rem .5rem"><strong>Last Updated</strong></td><td>{{ job.updated_at[:10] }}</td></tr>
+    </table>
+
+    {% if history %}
+    <h4 style="margin-bottom:.4rem">History</h4>
+    <ul style="margin:0;padding-left:1.2rem">
+      {% for h in history %}
+      <li>{{ h.new_status.replace('_',' ')|capitalize }} — {{ h.changed_at[:10] }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

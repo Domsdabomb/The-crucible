@@ -30,6 +30,17 @@ def _load_or_create_key() -> bytes:
     key = Fernet.generate_key()
     os.makedirs(current_app.instance_path, exist_ok=True)
     with open(key_path, "wb") as f:
+    os.makedirs(current_app.instance_path, exist_ok=True)
+    key = Fernet.generate_key()
+    try:
+        # O_EXCL makes creation atomic across processes: only one worker can
+        # win this race, so multiple gunicorn workers can't each generate and
+        # write a different key on first request.
+        fd = os.open(key_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        with open(key_path, "rb") as f:
+            return f.read().strip()
+    with os.fdopen(fd, "wb") as f:
         f.write(key)
     return key
 

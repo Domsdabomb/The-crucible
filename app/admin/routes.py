@@ -21,11 +21,13 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 
 from app.db import get_db
 from app.services.auth import login_required
+from app.services.auth import login_required, admin_required, create_admin
 from app.services.crypto import encrypt_passcode, decrypt_passcode
 from app.services.sms_service import sms_intake, sms_ready, send_sms
 from app.services.wallet import (
@@ -106,6 +108,17 @@ def _log_status_change(db, job_id: int, old_status: str | None,
     )
 
 
+def _can_access_job(job_technician_id: int | None) -> bool:
+    """Admins can access any job. Technicians can only access jobs
+    assigned to their own technicians row."""
+    if session.get("admin_role") == "admin":
+        return True
+    return (
+        job_technician_id is not None
+        and job_technician_id == session.get("admin_technician_id")
+    )
+
+
 def _validate_phone(phone: str) -> str:
     """Raise ValueError if not a valid Canadian E.164 number."""
     phone = phone.strip()
@@ -137,7 +150,7 @@ def _job_new_error_response(db, errors: list[str]):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/")
-@login_required
+@admin_required
 def dashboard():
     db = get_db()
 
@@ -207,6 +220,13 @@ def job_list():
     date_from = request.args.get("date_from")
     date_to   = request.args.get("date_to")
     search    = request.args.get("search", "").strip()
+
+    # Technicians only ever see their own jobs — override whatever was
+    # submitted rather than trusting the client. Fail closed (-1 matches
+    # no real technician) if a technician-role session somehow has no
+    # linked technician_id, instead of falling through to "no filter".
+    if session.get("admin_role") != "admin":
+        tech_id = session.get("admin_technician_id") or -1
 
     conditions = []
     params: list = []
@@ -309,6 +329,11 @@ def job_detail(job_id: int):
 
     if job is None:
         abort(404)
+    if not _can_access_job(job["technician_id"]):
+        abort(403)
+
+    job = dict(job)
+    job["passcode"] = decrypt_passcode(job["passcode"])
 
     job = dict(job)
     job["passcode"] = decrypt_passcode(job["passcode"])
@@ -333,7 +358,7 @@ def job_detail(job_id: int):
     ).fetchall()
 
     ctx = {
-        "job":         dict(job),
+        "job":         job,
         "parts":       [dict(p) for p in parts],
         "history":     [dict(h) for h in history],
         "sms_logs":    [dict(s) for s in sms_logs],
@@ -357,12 +382,14 @@ def job_update_status(job_id: int):
     db = get_db()
 
     job = db.execute(
-        "SELECT id, status, customer_id FROM repair_jobs WHERE id = ?",
+        "SELECT id, status, customer_id, technician_id FROM repair_jobs WHERE id = ?",
         (job_id,),
     ).fetchone()
 
     if job is None:
         abort(404)
+    if not _can_access_job(job["technician_id"]):
+        abort(403)
 
     new_status  = (request.form.get("status") or "").strip()
     changed_by  = (request.form.get("changed_by") or "admin").strip()
@@ -447,7 +474,7 @@ def job_update_status(job_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/jobs/new", methods=["GET", "POST"])
-@login_required
+@admin_required
 def job_new():
     if request.method == "GET":
         db = get_db()
@@ -590,10 +617,12 @@ def job_edit(job_id: int):
     db = get_db()
 
     job = db.execute(
-        "SELECT id FROM repair_jobs WHERE id = ?", (job_id,)
+        "SELECT id, technician_id FROM repair_jobs WHERE id = ?", (job_id,)
     ).fetchone()
     if job is None:
         abort(404)
+    if not _can_access_job(job["technician_id"]):
+        abort(403)
 
     description      = (request.form.get("description")      or "").strip() or None
     diagnosis_notes  = (request.form.get("diagnosis_notes")  or "").strip() or None
@@ -670,7 +699,7 @@ def job_edit(job_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/customers")
-@login_required
+@admin_required
 def customer_list():
     db = get_db()
     customers = db.execute(
@@ -693,7 +722,7 @@ def customer_list():
 
 
 @admin_bp.route("/customers/<int:customer_id>")
-@login_required
+@admin_required
 def customer_detail(customer_id: int):
     db = get_db()
 
@@ -739,15 +768,18 @@ def customer_detail(customer_id: int):
 
 @admin_bp.route("/technicians")
 @login_required
+@admin_required
 def technician_list():
     db = get_db()
     technicians = db.execute(
         """
         SELECT t.*, COUNT(rj.id) AS active_jobs
+        SELECT t.*, COUNT(DISTINCT rj.id) AS active_jobs, a.username AS login_username
         FROM   technicians t
         LEFT JOIN repair_jobs rj
                ON rj.technician_id = t.id
               AND rj.status NOT IN ('picked_up', 'cancelled', 'closed')
+        LEFT JOIN admins a ON a.technician_id = t.id
         GROUP  BY t.id
         ORDER  BY t.active DESC, t.name ASC
         """
@@ -760,6 +792,7 @@ def technician_list():
 
 @admin_bp.route("/technicians/new", methods=["POST"])
 @login_required
+@admin_required
 def technician_new():
     name  = (request.form.get("name")  or "").strip()
     email = (request.form.get("email") or "").strip() or None
@@ -778,6 +811,7 @@ def technician_new():
 
     db = get_db()
     try:
+        db.execute("BEGIN")
         db.execute(
             "INSERT INTO technicians (name, email, phone) VALUES (?, ?, ?)",
             (name, email, phone),
@@ -785,6 +819,7 @@ def technician_new():
         db.commit()
     except sqlite3.IntegrityError:
         db.rollback()
+        db.execute("ROLLBACK")
         flash(f"A technician with email {email!r} already exists.", "error")
         return redirect(url_for("admin.technician_list"))
 
@@ -794,6 +829,7 @@ def technician_new():
 
 @admin_bp.route("/technicians/<int:tech_id>/toggle", methods=["POST"])
 @login_required
+@admin_required
 def technician_toggle(tech_id: int):
     db = get_db()
     tech = db.execute("SELECT id, active, name FROM technicians WHERE id = ?", (tech_id,)).fetchone()
@@ -807,6 +843,57 @@ def technician_toggle(tech_id: int):
     return redirect(url_for("admin.technician_list"))
 
 
+@admin_bp.route("/technicians/<int:tech_id>/create-login", methods=["GET", "POST"])
+@admin_required
+def technician_create_login(tech_id: int):
+    db = get_db()
+    tech = db.execute("SELECT id, name FROM technicians WHERE id = ?", (tech_id,)).fetchone()
+    if tech is None:
+        abort(404)
+
+    existing = db.execute(
+        "SELECT username FROM admins WHERE technician_id = ?", (tech_id,)
+    ).fetchone()
+    if existing:
+        flash(f"{tech['name']} already has a login ({existing['username']}).", "error")
+        return redirect(url_for("admin.technician_list"))
+
+    if request.method == "GET":
+        return render_template(
+            "admin/technician_create_login.html", tech=dict(tech), errors=[], username="",
+        )
+
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password", "")
+    confirm  = request.form.get("confirm", "")
+
+    errors: list[str] = []
+    if not username:
+        errors.append("Username is required.")
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters.")
+    if password != confirm:
+        errors.append("Passwords do not match.")
+
+    if errors:
+        return render_template(
+            "admin/technician_create_login.html",
+            tech=dict(tech), errors=errors, username=username,
+        )
+
+    try:
+        create_admin(username, password, role="technician", technician_id=tech_id)
+    except sqlite3.IntegrityError:
+        errors.append(f"Username {username!r} is already taken.")
+        return render_template(
+            "admin/technician_create_login.html",
+            tech=dict(tech), errors=errors, username=username,
+        )
+
+    flash(f"Login created for {tech['name']}.", "success")
+    return redirect(url_for("admin.technician_list"))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Parts management
 # ─────────────────────────────────────────────────────────────────────────────
@@ -817,6 +904,11 @@ def part_add(job_id: int):
     db = get_db()
     if not db.execute("SELECT id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone():
         abort(404)
+    job = db.execute("SELECT id, technician_id FROM repair_jobs WHERE id = ?", (job_id,)).fetchone()
+    if not job:
+        abort(404)
+    if not _can_access_job(job["technician_id"]):
+        abort(403)
 
     name        = (request.form.get("name")        or "").strip()
     part_number = (request.form.get("part_number") or "").strip() or None
@@ -847,6 +939,11 @@ def part_update_status(part_id: int):
     part = db.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
     if not part:
         abort(404)
+    job = db.execute(
+        "SELECT technician_id FROM repair_jobs WHERE id = ?", (part["job_id"],)
+    ).fetchone()
+    if not _can_access_job(job["technician_id"] if job else None):
+        abort(403)
 
     new_status = (request.form.get("status") or "").strip()
     valid = ("ordered", "received", "installed", "returned")
@@ -866,6 +963,7 @@ def part_update_status(part_id: int):
 
 @admin_bp.route("/sms-log")
 @login_required
+@admin_required
 def sms_log():
     db = get_db()
     logs = db.execute(
@@ -893,6 +991,7 @@ def sms_log():
 
 @admin_bp.route("/invoices")
 @login_required
+@admin_required
 def invoice_list():
     db = get_db()
     rows = db.execute(
@@ -914,6 +1013,7 @@ def invoice_list():
 
 @admin_bp.route("/jobs/<int:job_id>/invoice/new", methods=["GET", "POST"])
 @login_required
+@admin_required
 def invoice_new(job_id: int):
     db = get_db()
 
@@ -994,6 +1094,7 @@ def invoice_new(job_id: int):
 
 @admin_bp.route("/invoices/<int:invoice_id>")
 @login_required
+@admin_required
 def invoice_detail(invoice_id: int):
     db = get_db()
     inv = db.execute(
@@ -1021,6 +1122,7 @@ def invoice_detail(invoice_id: int):
 
 @admin_bp.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
 @login_required
+@admin_required
 def invoice_mark_paid(invoice_id: int):
     db = get_db()
     inv = db.execute("SELECT id, status FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -1041,6 +1143,7 @@ def invoice_mark_paid(invoice_id: int):
 
 @admin_bp.route("/invoices/<int:invoice_id>/send-sms", methods=["POST"])
 @login_required
+@admin_required
 def invoice_send_sms(invoice_id: int):
     db = get_db()
     inv = db.execute(
@@ -1085,6 +1188,7 @@ def invoice_send_sms(invoice_id: int):
 
 @admin_bp.route("/wallets")
 @login_required
+@admin_required
 def wallet_list():
     db = get_db()
     rows = db.execute(
@@ -1092,7 +1196,7 @@ def wallet_list():
         SELECT w.*, c.name AS customer_name, c.phone AS customer_phone
         FROM   wallets    w
         JOIN   customers  c ON c.id = w.customer_id
-        ORDER  BY w.balance_coins DESC, c.name ASC
+  ORDER  BY w.balance_coins DESC, c.name ASC
         """
     ).fetchall()
     ctx = {"wallets": [dict(r) for r in rows], "COIN_VALUE_CENTS": COIN_VALUE_CENTS}
@@ -1103,6 +1207,7 @@ def wallet_list():
 
 @admin_bp.route("/wallets/<int:customer_id>")
 @login_required
+@admin_required
 def wallet_detail(customer_id: int):
     db = get_db()
 
@@ -1137,6 +1242,7 @@ def wallet_detail(customer_id: int):
 
 @admin_bp.route("/wallets/<int:customer_id>/adjust", methods=["POST"])
 @login_required
+@admin_required
 def wallet_adjust(customer_id: int):
     db = get_db()
     customer = db.execute(
