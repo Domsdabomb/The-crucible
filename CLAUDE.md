@@ -321,4 +321,7 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 - **Customer self-serve tracking** — the v1 `/track` route (public job-status lookup) has not been ported.
 - **Single account tier** — no per-technician logins or role separation; every admin account has full access.
 - **No login rate limiting** — `/auth/login` has no lockout/throttle on repeated failed attempts.
-- **CI** — the pytest suite exists (`tests/`) but nothing runs it automatically yet; no GitHub Actions workflow.
+
+## CI
+
+`.github/workflows/tests.yml` runs the pytest suite on every push and pull request against `main` (ubuntu-latest, Python 3.12).
