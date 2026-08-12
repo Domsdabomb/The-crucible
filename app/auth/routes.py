@@ -5,10 +5,12 @@ from app.services.auth import (
     is_locked, register_failed_login, register_successful_login,
     LOCKOUT_MINUTES,
 )
+from app.services.rate_limit import rate_limit
 from . import auth_bp
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@rate_limit(max_requests=10, window_seconds=60)
 def login():
     if not admin_exists():
         return redirect(url_for("auth.setup"))

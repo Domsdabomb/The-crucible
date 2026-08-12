@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "Flask Dev Server",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "C:\\Users\\Dominik\\Documents\\projects\\crucible\\The-crucible-main\\venv\\Scripts\\python.exe",
       "runtimeArgs": ["run.py"],
       "port": 5000
     }

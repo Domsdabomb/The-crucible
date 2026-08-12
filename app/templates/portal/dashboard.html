@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}My Account — The Crucible{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h2 style="margin:0">Welcome, {{ customer.name }}</h2>
+  <a href="{{ url_for('portal.job_new') }}" class="btn btn-primary">+ Request a Repair</a>
+</div>
+
+<div class="card" style="max-width:400px">
+  <h3 style="margin-top:0">🪙 Crucible Coins</h3>
+  <p style="font-size:1.5rem;font-weight:700;color:#0d6efd;margin:.25rem 0">{{ wallet.balance_coins }} coins</p>
+  <p style="color:#666;margin:0">Worth ${{ "%.2f"|format(wallet.balance_coins * COIN_VALUE_CENTS / 100) }} CAD toward your next invoice.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">My Repairs ({{ jobs|length }})</h3>
+  {% if jobs %}
+  <table>
+    <thead><tr><th>Ticket #</th><th>Device</th><th>Status</th><th>Promised</th><th>Submitted</th></tr></thead>
+    <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td>#{{ j.id }}</td>
+      <td>{{ j.make }} {{ j.model }}</td>
+      <td><span class="badge badge-{{ j.status }}">{{ j.status.replace('_',' ') }}</span></td>
+      <td>{{ j.promised_date or '—' }}</td>
+      <td>{{ j.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;margin:0">No repairs on file yet. Click "Request a Repair" above to get started.</p>
+  {% endif %}
+</div>
+{% endblock %}

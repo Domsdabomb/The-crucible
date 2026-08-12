@@ -21,18 +21,32 @@ the-crucible/
 │   │   ├── __init__.py     # Blueprint: admin_bp, url_prefix="/admin"
 │   │   └── routes.py       # All admin routes (jobs, customers, technicians, parts, invoices, wallets, SMS log)
 │   ├── auth/
-│   │   ├── __init__.py     # Blueprint: auth_bp, url_prefix="/auth"
+│   │   ├── __init__.py     # Blueprint: auth_bp, url_prefix="/auth" (admin/technician staff login)
 │   │   └── routes.py       # login / logout / first-run setup
+│   ├── track/
+│   │   ├── __init__.py     # Blueprint: track_bp, url_prefix="/track"
+│   │   └── routes.py       # Public, unauthenticated phone+ticket job-status lookup
+│   ├── portal/
+│   │   ├── __init__.py     # Blueprint: portal_bp, url_prefix="/portal" (customer accounts)
+│   │   └── routes.py       # Customer signup/login/logout, dashboard, online repair request
 │   ├── services/
-│   │   ├── auth.py          # Password hashing (werkzeug PBKDF2) + login_required decorator
+│   │   ├── auth.py          # Admin/technician: password hashing, login_required/admin_required, lockout
+│   │   ├── customer_auth.py # Customer portal: customer_login_required, lockout (separate from staff auth)
 │   │   ├── crypto.py        # Fernet encrypt/decrypt for device passcodes at rest
+│   │   ├── rate_limit.py    # Per-IP rate_limit decorator for public/anonymous endpoints
 │   │   ├── sms_service.py   # SMS stub: send_sms, sms_intake, sms_ready
 │   │   └── wallet.py        # Crucible Coin loyalty wallet: earn/spend/redeem logic
 │   └── templates/
 │       ├── base.html
 │       ├── auth/
-│       │   ├── login.html
+│       │   ├── login.html   # Staff login; also links to the customer portal signup/login
 │       │   └── setup.html
+│       ├── track/
+│       │   └── track.html
+│       ├── portal/
+│       │   ├── signup.html / login.html
+│       │   ├── dashboard.html
+│       │   └── job_new.html
 │       └── admin/
 │           ├── dashboard.html
 │           ├── job_list.html / job_detail.html / job_new.html
@@ -89,6 +103,7 @@ The schema lives in `db/schema.sql` and is applied via `flask init-db` (or `init
 
 **Key design decisions:**
 - **Phone is the customer upsert key** — `customers.phone` is UNIQUE; intake updates name/email if phone already exists.
+- **`customers.password_hash` is nullable** — `NULL` means this customer only exists from staff-side intake and has never signed up for the online portal. Same lockout pattern as `admins` (`failed_attempts` / `locked_until`), tracked separately in `app/services/customer_auth.py`.
 - **Money is stored as integer cents** — avoids floating-point drift; all `*_cents` columns. `repair_jobs.total_cents` and `invoices.subtotal_cents` / `amount_due_cents` are `GENERATED ALWAYS AS` columns.
 - **WAL mode** — `PRAGMA journal_mode = WAL` is set on every connection in `get_db()`.
 - **Device passcode** is encrypted at rest with Fernet (`app/services/crypto.py`) — `job_new` encrypts on write, `job_detail` decrypts for display. Never read/write `devices.passcode` directly without going through `encrypt_passcode`/`decrypt_passcode`.
@@ -140,7 +155,7 @@ All state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are protected by an 
 
 ## Testing
 
-`tests/` holds a pytest suite covering the state machine, tax calc, wallet earn/spend/redeem, CSRF enforcement, auth (hash/verify, login/setup flow), `IntegrityError` handling, and passcode encryption (including asserting the raw DB value is never plaintext).
+`tests/` holds a pytest suite covering the state machine, tax calc, wallet earn/spend/redeem, CSRF enforcement, staff auth (hash/verify, login/setup flow, lockout), role separation (admin vs. technician scoping), public job tracking, the customer portal (signup's two claim paths, login/lockout, dashboard scoping, request-pinning, session isolation from staff auth), `IntegrityError` handling, and passcode encryption (including asserting the raw DB value is never plaintext).
 
 ```bash
 python -m pytest          # run from the project root
@@ -187,13 +202,19 @@ python run.py                  # dev server on http://127.0.0.1:5000
 
 ## Route Map
 
-Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); auth routes are on `auth_bp` (prefix `/auth`). All admin routes require login. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
+Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); staff auth routes are on `auth_bp` (prefix `/auth`); public tracking is on `track_bp` (prefix `/track`); customer accounts are on `portal_bp` (prefix `/portal`). Admin routes require `@login_required` or `@admin_required` (see Role Separation below); portal routes require `@customer_login_required`; `track_bp` and `auth_bp`'s `login`/`setup` are intentionally open. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
 
 | Method | Route | Function | Description |
 |---|---|---|---|
-| GET/POST | `/auth/login` | `login` | Login form; redirects to setup if no admin exists |
+| GET/POST | `/auth/login` | `login` | Staff login form; redirects to setup if no admin exists |
 | GET | `/auth/logout` | `logout` | Clears session |
 | GET/POST | `/auth/setup` | `setup` | First-run admin account creation |
+| GET/POST | `/track/` | `track` | Public: look up a job by phone + ticket number, no login |
+| GET/POST | `/portal/signup` | `signup` | Customer sign-up (new record, or claim an existing one via ticket) |
+| GET/POST | `/portal/login` | `login` | Customer login (lockout-protected) |
+| GET | `/portal/logout` | `logout` | Clears the customer session |
+| GET | `/portal/` | `dashboard` | Customer's own repair history + Crucible Coin balance |
+| GET/POST | `/portal/jobs/new` | `job_new` | Customer-submitted repair request, pinned to their own account |
 | GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority |
 | GET | `/admin/jobs` | `job_list` | Filterable list: status, priority, tech, date range, full-text search |
 | GET | `/admin/jobs/<id>` | `job_detail` | Full ticket: device, parts, status history, SMS log |
@@ -330,8 +351,8 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 | Auth | Salted SHA-256 admin login | Session login, werkzeug PBKDF2 hashing, CSRF-protected forms |
 | Loyalty coins | Full wallet system | Ported: `wallets` / `wallet_transactions`, earn-on-pickup, redeem-on-invoice |
 | Invoicing | Ported from v1 | `invoices` table, snapshots job pricing, coin discounts |
-| Customer self-serve tracking | `/track` route | Not ported yet |
 | Customer self-serve tracking | `/track` route | Ported: public phone + ticket lookup, no login |
+| Customer accounts | None | `app/portal` — customers can sign up, view repair history/wallet, and submit repair requests online |
 | Account tiers | Admin only | `admin` and `technician` roles; technicians scoped to their own jobs |
 
 ---
@@ -339,10 +360,30 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 ## Known TODOs (from codebase)
 
 - **Real SMS provider** — `sms_service.py` points at a placeholder URL; wire up real credentials via `INVOICETOSMS_API_KEY`.
-- **Customer self-serve tracking** — the v1 `/track` route (public job-status lookup) has not been ported.
-- **Single account tier** — no per-technician logins or role separation; every admin account has full access.
-- **No login rate limiting** — `/auth/login` has no lockout/throttle on repeated failed attempts.
-- **CI** — the pytest suite exists (`tests/`) but nothing runs it automatically yet; no GitHub Actions workflow.
+- **Rate limiting is in-process only** — `app/services/rate_limit.py` is a hand-rolled per-IP limiter with no shared backend. It resets on restart and doesn't coordinate across multiple worker processes (e.g. several gunicorn workers), so a determined attacker spread across workers gets a higher effective limit than configured. Fine for a single-shop app on one dev server; upgrade to Flask-Limiter + Redis if this ever runs multi-worker in production. No CAPTCHA either.
+- **No email verification on customer signup** — `customers.email` is accepted at face value; there's no confirm-your-email step.
+
+---
+
+## Customer Portal (`app/portal`)
+
+Separate, unrelated auth system from staff login (`app/auth`) — different session key (`session["customer_id"]`, never `admin_id`), different password column (`customers.password_hash`), different decorator (`customer_login_required`). A customer session can never grant admin/technician access and vice versa; see `test_customer_session_cannot_access_admin_routes` / `test_admin_session_cannot_access_portal_dashboard` in `tests/test_portal.py`.
+
+- **Sign up** (`/portal/signup`) has two paths, both in one form:
+  - **Brand-new phone number** → creates a new `customers` row directly (needs a name).
+  - **Phone number already has a staff-created record** (e.g. a walk-in customer with repair history but no portal account) → the form requires a matching ticket number (`repair_jobs.id` tied to that phone), the same two-factor bar `/track` uses, before it'll set a password on that existing row. A phone number alone isn't proof of identity — phone numbers aren't secret, and intake upserts customers by phone. Existing name/email are preserved, not overwritten.
+  - A phone that already has `password_hash` set errors with "log in instead."
+- **Login** (`/portal/login`) mirrors the admin lockout pattern: `MAX_FAILED_LOGIN_ATTEMPTS = 5`, `LOCKOUT_MINUTES = 15`, tracked on `customers.failed_attempts`/`locked_until`.
+- **Dashboard** (`/portal/`) shows the customer's own repair history and Crucible Coin balance (read-only — coins can only be spent/adjusted by staff).
+- **Online repair request** (`/portal/jobs/new`) — `customer_id` and `phone` always come from the session, never from form input, so a logged-in customer can only ever create jobs against their own record. No technician/pricing/priority fields (staff triages after intake, same as in-person); passcode is encrypted the same way as staff intake.
+- The admin login page (`/auth/login`) links to `/portal/signup` and `/portal/login`; `base.html`'s nav branches three ways on `admin_id` / `customer_id` / neither.
+
+### Rate Limiting (`app/services/rate_limit.py`)
+- `@rate_limit(max_requests, window_seconds)` — per-IP, per-view sliding-window counter, no new dependency. Applied to the four fully public/anonymous entry points: `/auth/login` and `/portal/login` (10/min — on top of their own per-account lockout, so a phone/username-enumeration attack across *many* accounts still gets throttled), `/portal/signup` (10/min), `/track` (15/min).
+- A no-op whenever `current_app.testing` is set — see the docstring for why (a process-global counter would otherwise fail unrelated tests based on the suite's own request volume). `tests/test_rate_limit.py` flips `app.testing` off inside a request context to test the real enforcement path in isolation.
+- In-process/single-worker only; see Known TODOs.
+
+---
 
 ## CI
 
