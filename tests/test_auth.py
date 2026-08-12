@@ -1,4 +1,8 @@
-from app.services.auth import admin_exists, create_admin, get_admin, hash_password, verify_password
+from app.services.auth import (
+    admin_exists, create_admin, get_admin, hash_password, verify_password,
+    is_locked, register_failed_login, register_successful_login,
+    MAX_FAILED_LOGIN_ATTEMPTS,
+)
 
 
 def test_password_hash_roundtrip():
@@ -67,3 +71,56 @@ def test_login_with_wrong_password_is_rejected(client, csrf_extractor):
         "username": "carol", "password": "wrongpassword", "csrf_token": token,
     })
     assert b"Invalid username or password" in resp.data
+
+
+def test_account_not_locked_below_threshold(db):
+    create_admin("dave", "password123")
+    admin = get_admin("dave")
+    for _ in range(MAX_FAILED_LOGIN_ATTEMPTS - 1):
+        register_failed_login(admin["id"])
+    assert is_locked(get_admin("dave")) is False
+
+
+def test_account_locks_after_max_failed_attempts(db):
+    create_admin("erin", "password123")
+    admin = get_admin("erin")
+    for _ in range(MAX_FAILED_LOGIN_ATTEMPTS):
+        register_failed_login(admin["id"])
+    assert is_locked(get_admin("erin")) is True
+
+
+def test_successful_login_resets_lockout_state(db):
+    create_admin("frank", "password123")
+    admin = get_admin("frank")
+    for _ in range(MAX_FAILED_LOGIN_ATTEMPTS):
+        register_failed_login(admin["id"])
+    assert is_locked(get_admin("frank")) is True
+
+    register_successful_login(admin["id"])
+    refreshed = get_admin("frank")
+    assert is_locked(refreshed) is False
+    assert refreshed["failed_attempts"] == 0
+
+
+def test_locked_account_rejects_even_correct_password_via_route(client, csrf_extractor):
+    resp = client.get("/auth/setup")
+    token = csrf_extractor(resp.get_data(as_text=True))
+    client.post("/auth/setup", data={
+        "username": "grace", "password": "correcthorse1", "confirm": "correcthorse1",
+        "csrf_token": token,
+    })
+    client.get("/auth/logout")
+
+    for _ in range(MAX_FAILED_LOGIN_ATTEMPTS):
+        resp = client.get("/auth/login")
+        token = csrf_extractor(resp.get_data(as_text=True))
+        client.post("/auth/login", data={
+            "username": "grace", "password": "wrongpassword", "csrf_token": token,
+        })
+
+    resp = client.get("/auth/login")
+    token = csrf_extractor(resp.get_data(as_text=True))
+    resp = client.post("/auth/login", data={
+        "username": "grace", "password": "correcthorse1", "csrf_token": token,
+    })
+    assert b"locked" in resp.data.lower()

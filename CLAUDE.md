@@ -22,9 +22,12 @@ the-crucible/
 │   │   └── routes.py       # All admin routes (jobs, customers, technicians, parts, invoices, wallets, SMS log)
 │   ├── auth/
 │   │   ├── __init__.py     # Blueprint: auth_bp, url_prefix="/auth"
-│   │   └── routes.py       # login / logout / first-run setup
+│   │   └── routes.py       # login / logout / first-run setup / failed-login lockout
+│   ├── track/
+│   │   ├── __init__.py     # Blueprint: track_bp, url_prefix="/track"
+│   │   └── routes.py       # Public, unauthenticated job-status lookup (phone + ticket #)
 │   ├── services/
-│   │   ├── auth.py          # Password hashing (werkzeug PBKDF2) + login_required decorator
+│   │   ├── auth.py          # Password hashing (werkzeug PBKDF2), login_required, lockout tracking
 │   │   ├── crypto.py        # Fernet encrypt/decrypt for device passcodes at rest
 │   │   ├── sms_service.py   # SMS stub: send_sms, sms_intake, sms_ready
 │   │   └── wallet.py        # Crucible Coin loyalty wallet: earn/spend/redeem logic
@@ -33,6 +36,8 @@ the-crucible/
 │       ├── auth/
 │       │   ├── login.html
 │       │   └── setup.html
+│       ├── track/
+│       │   └── track.html
 │       └── admin/
 │           ├── dashboard.html
 │           ├── job_list.html / job_detail.html / job_new.html
@@ -187,13 +192,14 @@ python run.py                  # dev server on http://127.0.0.1:5000
 
 ## Route Map
 
-Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); auth routes are on `auth_bp` (prefix `/auth`). All admin routes require login. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
+Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); auth routes are on `auth_bp` (prefix `/auth`); the public tracker is on `track_bp` (prefix `/track`). All admin routes require login; `/track` is intentionally unauthenticated. Most read routes respond to `Accept: application/json` for JSON output — the `_wants_json()` helper selects response type.
 
 | Method | Route | Function | Description |
 |---|---|---|---|
-| GET/POST | `/auth/login` | `login` | Login form; redirects to setup if no admin exists |
+| GET/POST | `/auth/login` | `login` | Login form; redirects to setup if no admin exists; locks account after repeated failures |
 | GET | `/auth/logout` | `logout` | Clears session |
 | GET/POST | `/auth/setup` | `setup` | First-run admin account creation |
+| GET/POST | `/track/` | `track` | Public job-status lookup by phone + ticket number (no login) |
 | GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority |
 | GET | `/admin/jobs` | `job_list` | Filterable list: status, priority, tech, date range, full-text search |
 | GET | `/admin/jobs/<id>` | `job_detail` | Full ticket: device, parts, status history, SMS log |
@@ -247,6 +253,17 @@ At intake, the customer is looked up by phone number (E.164). If found, their na
 
 ### Invoicing (`invoices` table)
 An invoice snapshots a job's `labour_cents` / `parts_cents` / `gst_cents` / `pst_cents` at creation time (so later edits to the job don't retroactively change a finalized invoice). `subtotal_cents` and `amount_due_cents` are GENERATED columns; `discount_cents = coins_applied * COIN_VALUE_CENTS`.
+
+### Login Lockout (`app/services/auth.py`)
+- `MAX_FAILED_LOGIN_ATTEMPTS = 5`, `LOCKOUT_MINUTES = 15` — per-account, tracked via `admins.failed_attempts` / `admins.locked_until`.
+- A failed login increments the counter; hitting the threshold sets `locked_until` and resets the counter. A successful login clears both.
+- `locked_until` is an ISO-8601 UTC string compared lexicographically against `now` — same convention as other timestamp columns in this codebase, no datetime parsing needed.
+- This is account-level only, not IP-based — an attacker who doesn't know a valid username isn't throttled (there's no row to increment).
+
+### Public Job Tracking (`app/track/routes.py`)
+- Requires **both** the customer's phone number and their ticket number (`repair_jobs.id`) — a phone number alone can't be used to browse someone's repair history.
+- Shows status, device make/model, promised date, and quoted estimate; deliberately omits passcode, internal notes, and full pricing/technician detail.
+- Not rate-limited — two-factor lookup (phone + ticket) is the only protection against enumeration.
 
 ### SMS Service (`app/services/sms_service.py`)
 - Currently a **stub** — POSTs to a placeholder URL, not a real provider.
@@ -311,16 +328,14 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 | Auth | Salted SHA-256 admin login | Session login, werkzeug PBKDF2 hashing, CSRF-protected forms |
 | Loyalty coins | Full wallet system | Ported: `wallets` / `wallet_transactions`, earn-on-pickup, redeem-on-invoice |
 | Invoicing | Ported from v1 | `invoices` table, snapshots job pricing, coin discounts |
-| Customer self-serve tracking | `/track` route | Not ported yet |
+| Customer self-serve tracking | `/track` route | Ported: public phone + ticket lookup, no login |
 
 ---
 
 ## Known TODOs (from codebase)
 
 - **Real SMS provider** — `sms_service.py` points at a placeholder URL; wire up real credentials via `INVOICETOSMS_API_KEY`.
-- **Customer self-serve tracking** — the v1 `/track` route (public job-status lookup) has not been ported.
 - **Single account tier** — no per-technician logins or role separation; every admin account has full access.
-- **No login rate limiting** — `/auth/login` has no lockout/throttle on repeated failed attempts.
 
 ## CI
 

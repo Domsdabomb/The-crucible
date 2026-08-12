@@ -227,9 +227,11 @@ CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices (customer_id);
 -- 11. ADMINS
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS admins (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,               -- werkzeug generate_password_hash() (PBKDF2-SHA256)
-    created_at    TEXT    NOT NULL
-                  DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT    NOT NULL UNIQUE,
+    password_hash   TEXT    NOT NULL,             -- werkzeug generate_password_hash() (PBKDF2-SHA256)
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT,                         -- ISO-8601 UTC; NULL when not locked
+    created_at      TEXT    NOT NULL
+                    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );

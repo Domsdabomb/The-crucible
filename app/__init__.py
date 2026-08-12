@@ -38,8 +38,10 @@ def create_app(test_config: dict | None = None) -> Flask:
     # ── Blueprints ────────────────────────────────────────────────────────────
     from app.admin import admin_bp
     from app.auth import auth_bp
+    from app.track import track_bp
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(track_bp)
 
     # ── CSRF protection ──────────────────────────────────────────────────────
     # Every form POSTs a hidden csrf_token field; this checks it against the
