@@ -11,6 +11,7 @@ import re
 from flask import render_template, request
 
 from app.db import get_db
+from app.services.rate_limit import rate_limit
 from . import track_bp
 
 E164_RE = re.compile(r"^\+1[2-9]\d{9}$")
@@ -32,6 +33,7 @@ def _lookup_job(job_id: int, phone: str):
 
 
 @track_bp.route("/", methods=["GET", "POST"])
+@rate_limit(max_requests=15, window_seconds=60)
 def track():
     job = None
     history = []

@@ -39,9 +39,11 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app.admin import admin_bp
     from app.auth import auth_bp
     from app.track import track_bp
+    from app.portal import portal_bp
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(track_bp)
+    app.register_blueprint(portal_bp)
 
     # ── CSRF protection ──────────────────────────────────────────────────────
     # Every form POSTs a hidden csrf_token field; this checks it against the
@@ -59,20 +61,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             if not token or not submitted or not secrets.compare_digest(token, submitted):
                 abort(400, "Invalid or missing CSRF token. Please refresh the page and try again.")
 
-    # ── CSRF protection ──────────────────────────────────────────────────────
-    # Every form POSTs a hidden csrf_token field; this checks it against the
-    # per-session token before any state-changing request is processed.
-    app.jinja_env.globals["csrf_token"] = _get_csrf_token
-
-    @app.before_request
-    def _csrf_protect():
-        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-            token = session.get("_csrf_token")
-            submitted = request.form.get("csrf_token")
-            if not token or not submitted or not secrets.compare_digest(token, submitted):
-                abort(400, "Invalid or missing CSRF token. Please refresh the page and try again.")
-
-    # Convenience redirect: / → /login (or /admin/ if already logged in)
+    # Convenience redirect: / → wherever this session belongs
     from flask import redirect, url_for
 
     @app.route("/")
@@ -81,6 +70,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             if session.get("admin_role") == "admin":
                 return redirect(url_for("admin.dashboard"))
             return redirect(url_for("admin.job_list"))
+        if "customer_id" in session:
+            return redirect(url_for("portal.dashboard"))
         return redirect(url_for("auth.login"))
 
     return app
