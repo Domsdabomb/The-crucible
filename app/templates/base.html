@@ -56,10 +56,18 @@
   <span style="flex:1"></span>
   <span style="color:#aaa;font-size:.85rem">{{ session.get('admin_username') }}</span>
   <a href="/auth/logout" style="color:#f88">Logout</a>
+  {% elif session.get('customer_id') %}
+  <a href="/portal/">My Account</a>
+  <a href="/portal/jobs/new">Request a Repair</a>
+  <span style="flex:1"></span>
+  <span style="color:#aaa;font-size:.85rem">{{ session.get('customer_name') }}</span>
+  <a href="/portal/logout" style="color:#f88">Logout</a>
   {% else %}
   <span style="flex:1"></span>
   <a href="/track/">Track Your Repair</a>
-  <a href="/auth/login">Login</a>
+  <a href="/portal/signup" class="btn btn-primary" style="padding:.3rem .8rem">Sign Up</a>
+  <a href="/portal/login">Customer Login</a>
+  <a href="/auth/login">Staff Login</a>
   {% endif %}
 </nav>
 {% with messages = get_flashed_messages(with_categories=true) %}

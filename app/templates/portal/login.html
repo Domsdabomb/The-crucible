@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Login — The Crucible{% endblock %}
+{% block title %}Customer Login — The Crucible{% endblock %}
 {% block content %}
 <div style="max-width:380px;margin:4rem auto">
   <div class="card">
     <h2 style="margin-top:0;text-align:center">🔧 The Crucible</h2>
-    <h3 style="text-align:center;color:#555;font-weight:normal;margin-top:0">Admin Login</h3>
+    <h3 style="text-align:center;color:#555;font-weight:normal;margin-top:0">Customer Login</h3>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
@@ -15,8 +15,8 @@
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:1rem">
-        <label style="display:block;margin-bottom:.3rem;font-weight:600">Username</label>
-        <input name="username" type="text" autocomplete="username" autofocus required
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Phone Number</label>
+        <input name="phone" type="tel" placeholder="+12505550100" autocomplete="tel" autofocus required
                style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
       </div>
       <div style="margin-bottom:1.25rem">
@@ -26,14 +26,9 @@
       </div>
       <button type="submit" class="btn btn-primary" style="width:100%;padding:.6rem">Log In</button>
     </form>
-  </div>
-
-  <div class="card" style="text-align:center">
-    <p style="margin:0 0 .75rem;color:#555">Are you a customer?</p>
-    <a href="/portal/signup" class="btn btn-primary" style="width:100%;padding:.6rem;box-sizing:border-box">Sign Up</a>
-    <p style="margin:.75rem 0 0;font-size:.85rem;color:#666">
-      Already have an account? <a href="/portal/login">Log in</a><br>
-      Just want to check a repair? <a href="/track/">Track without an account</a>
+    <p style="text-align:center;font-size:.85rem;color:#666;margin-top:1rem">
+      New here? <a href="{{ url_for('portal.signup') }}">Sign up</a><br>
+      Just want to check a repair? <a href="{{ url_for('track.track') }}">Track without an account</a>
     </p>
   </div>
 </div>

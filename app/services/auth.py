@@ -4,8 +4,6 @@ failed-login lockout tracking.
 """
 
 import functools
-
-from flask import session, redirect, url_for, flash, request
 from datetime import datetime, timedelta, timezone
 
 from flask import abort, session, redirect, url_for, flash, request

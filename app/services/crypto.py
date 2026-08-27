@@ -27,9 +27,6 @@ def _load_or_create_key() -> bytes:
         with open(key_path, "rb") as f:
             return f.read().strip()
 
-    key = Fernet.generate_key()
-    os.makedirs(current_app.instance_path, exist_ok=True)
-    with open(key_path, "wb") as f:
     os.makedirs(current_app.instance_path, exist_ok=True)
     key = Fernet.generate_key()
     try:

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Sign Up — The Crucible{% endblock %}
+{% block content %}
+<div style="max-width:420px;margin:3rem auto">
+  <div class="card">
+    <h2 style="margin-top:0;text-align:center">🔧 The Crucible</h2>
+    <h3 style="text-align:center;color:#555;font-weight:normal;margin-top:0">Customer Sign Up</h3>
+    <p style="color:#666;font-size:.9rem;text-align:center">Track your repairs, view your Crucible Coin balance, and request service online.</p>
+
+    {% if errors %}
+    <ul class="errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Name</label>
+        <input name="name" type="text" value="{{ form.name if form else '' }}" autocomplete="name"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Phone <small style="color:#666;font-weight:normal">(E.164, e.g. +12505550100)</small></label>
+        <input name="phone" type="tel" value="{{ form.phone if form else '' }}" required autocomplete="tel"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Email <small style="color:#666;font-weight:normal">(optional)</small></label>
+        <input name="email" type="email" value="{{ form.email if form else '' }}" autocomplete="email"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Password <span style="color:#999;font-weight:normal">(min 8 chars)</span></label>
+        <input name="password" type="password" required autocomplete="new-password"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Confirm Password</label>
+        <input name="confirm" type="password" required autocomplete="new-password"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:1.25rem">
+        <label style="display:block;margin-bottom:.3rem;font-weight:600">Ticket Number <small style="color:#666;font-weight:normal">(only if you've had a repair here before)</small></label>
+        <input name="ticket" type="text" value="{{ form.ticket if form else '' }}" placeholder="e.g. 42"
+               style="width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+        <small style="color:#999">Find this on your intake receipt — it links your new account to your existing repair history.</small>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;padding:.6rem">Sign Up</button>
+    </form>
+    <p style="text-align:center;font-size:.85rem;color:#666;margin-top:1rem">
+      Already have an account? <a href="{{ url_for('portal.login') }}">Log in</a><br>
+      Just want to check a repair? <a href="{{ url_for('track.track') }}">Track without an account</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
