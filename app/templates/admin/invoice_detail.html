@@ -57,9 +57,10 @@
 </div>
 {% endif %}
 
-<div class="card">
+<div class="card no-print">
   <h3 style="margin-top:0">Actions</h3>
   <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+    <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Print</button>
     {% if inv.status != 'paid' %}
     <form method="post" action="/admin/invoices/{{ inv.id }}/mark-paid">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -75,5 +76,5 @@
   </div>
 </div>
 
-<p style="color:#999;font-size:.85rem">Invoice created {{ inv.created_at[:16].replace('T',' ') }}</p>
+<p class="no-print" style="color:#999;font-size:.85rem">Invoice created {{ inv.created_at[:16].replace('T',' ') }}</p>
 {% endblock %}

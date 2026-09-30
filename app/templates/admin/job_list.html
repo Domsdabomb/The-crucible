@@ -54,9 +54,12 @@
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
     <strong>{{ jobs|length }} job(s)</strong>
-    {% if session.get('admin_role') == 'admin' %}
-    <a href="/admin/jobs/new" class="btn btn-primary">+ New Job</a>
-    {% endif %}
+    <div style="display:flex;gap:.5rem">
+      <a href="/admin/jobs/export.csv?{{ request.query_string.decode('utf-8') }}" class="btn btn-secondary">Export CSV</a>
+      {% if session.get('admin_role') == 'admin' %}
+      <a href="/admin/jobs/new" class="btn btn-primary">+ New Job</a>
+      {% endif %}
+    </div>
   </div>
   <table>
     <thead>
