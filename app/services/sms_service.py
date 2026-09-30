@@ -1,9 +1,9 @@
 """
 SMS Service — stub for InvoiceToSMS integration.
 
-TODO: Replace the placeholder URL and add real API credentials via environment
-      variables (INVOICETOSMS_API_KEY) before going to production.
-      Provider endpoint: https://api.invoicetosms.com/v1/send  (placeholder URL)
+The provider endpoint defaults to a placeholder URL. Set SMS_PROVIDER_URL to
+point at a real provider, plus INVOICETOSMS_API_KEY for the bearer token,
+before going to production.
 
 Every attempt — successful or failed — is logged to the sms_log table so there
 is a full audit trail for customer communications.
@@ -22,8 +22,13 @@ from flask import current_app
 
 log = logging.getLogger(__name__)
 
-# TODO: replace with real provider URL once API key is obtained
-_PROVIDER_URL = "https://api.invoicetosms.com/v1/send"
+# Placeholder until a real provider is configured via SMS_PROVIDER_URL.
+_DEFAULT_PROVIDER_URL = "https://api.invoicetosms.com/v1/send"
+
+
+def _provider_url() -> str:
+    """SMS provider endpoint — overridable via the SMS_PROVIDER_URL env var."""
+    return os.environ.get("SMS_PROVIDER_URL", _DEFAULT_PROVIDER_URL)
 
 
 def send_sms(phone: str, message: str, job_id: int | None = None,
@@ -56,11 +61,9 @@ def send_sms(phone: str, message: str, job_id: int | None = None,
     status = "queued"
 
     # ── HTTP stub ──────────────────────────────────────────────────────────
-    # TODO: add real auth header (Authorization: Bearer <api_key>) and handle
-    #       provider-specific response shape once the real API is confirmed.
     try:
         req = urllib.request.Request(
-            _PROVIDER_URL,
+            _provider_url(),
             data=payload,
             headers={
                 "Content-Type":  "application/json",

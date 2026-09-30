@@ -174,6 +174,7 @@ Notes for writing new tests (see `tests/conftest.py`):
 |---|---|---|
 | `SECRET_KEY` | Yes (prod) | Flask session secret; defaults to `"dev-change-in-production"` |
 | `PASSCODE_ENCRYPTION_KEY` | Recommended (prod) | urlsafe-base64 Fernet key for `devices.passcode`. If unset, a key is auto-generated into `instance/passcode.key` on first use — fine for dev, but losing that file makes existing encrypted passcodes unrecoverable, so set this explicitly in production. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
+| `SMS_PROVIDER_URL` | For SMS | HTTP endpoint `send_sms` POSTs to; defaults to the `https://api.invoicetosms.com/v1/send` placeholder. Set this to the real provider URL in production. |
 | `INVOICETOSMS_API_KEY` | For SMS | Bearer token for the SMS provider |
 | `SMS_SENDER_ID` | No | Sender name shown on SMS; defaults to `"TheCrucible"` |
 
@@ -289,8 +290,8 @@ An invoice snapshots a job's `labour_cents` / `parts_cents` / `gst_cents` / `pst
 - Not rate-limited — two-factor lookup (phone + ticket) is the only protection against enumeration.
 
 ### SMS Service (`app/services/sms_service.py`)
-- Currently a **stub** — POSTs to a placeholder URL, not a real provider.
-- `INVOICETOSMS_API_KEY` env var must be set for real sending (currently goes to a placeholder endpoint).
+- Currently a **stub** — POSTs to a placeholder URL, not a real provider. The endpoint is set via the `SMS_PROVIDER_URL` env var (defaults to the `https://api.invoicetosms.com/v1/send` placeholder); point it at the real provider URL in production.
+- `INVOICETOSMS_API_KEY` env var must be set for real sending (sent as a Bearer token).
 - Every attempt is written to `sms_log` regardless of success/failure.
 - Auto-sent: `sms_intake` (job creation), `sms_ready` (status → ready). Manually triggerable: invoice amount-due SMS (`invoice_send_sms`).
 - **TODO:** replace provider URL and test with real credentials before production.
@@ -359,7 +360,7 @@ This repo is the v2 rewrite. Key upgrades over the v1:
 
 ## Known TODOs (from codebase)
 
-- **Real SMS provider** — `sms_service.py` points at a placeholder URL; wire up real credentials via `INVOICETOSMS_API_KEY`.
+- **Real SMS provider** — `sms_service.py` defaults to a placeholder URL; point `SMS_PROVIDER_URL` at the real provider endpoint and set `INVOICETOSMS_API_KEY` before production.
 - **Rate limiting is in-process only** — `app/services/rate_limit.py` is a hand-rolled per-IP limiter with no shared backend. It resets on restart and doesn't coordinate across multiple worker processes (e.g. several gunicorn workers), so a determined attacker spread across workers gets a higher effective limit than configured. Fine for a single-shop app on one dev server; upgrade to Flask-Limiter + Redis if this ever runs multi-worker in production. No CAPTCHA either.
 - **No email verification on customer signup** — `customers.email` is accepted at face value; there's no confirm-your-email step.
 
