@@ -36,6 +36,9 @@ the-crucible/
 │   │   ├── rate_limit.py    # Per-IP rate_limit decorator for public/anonymous endpoints
 │   │   ├── sms_service.py   # SMS stub: send_sms, sms_intake, sms_ready
 │   │   └── wallet.py        # Crucible Coin loyalty wallet: earn/spend/redeem logic
+│   ├── static/
+│   │   ├── manifest.webmanifest  # PWA manifest (installable, standalone)
+│   │   └── icon.svg              # App icon (favicon / touch icon)
 │   └── templates/
 │       ├── base.html
 │       ├── auth/
@@ -218,6 +221,7 @@ Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); staff auth route
 | GET/POST | `/portal/jobs/new` | `job_new` | Customer-submitted repair request, pinned to their own account |
 | GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority |
 | GET | `/admin/jobs` | `job_list` | Filterable list: status, priority, tech, date range, full-text search |
+| GET | `/admin/jobs/export.csv` | `jobs_export_csv` | CSV export honoring the list view's filters; technicians scoped to own jobs |
 | GET | `/admin/jobs/<id>` | `job_detail` | Full ticket: device, parts, status history, SMS log |
 | GET/POST | `/admin/jobs/new` | `job_new` | Intake form: upserts customer, creates device + job in one transaction |
 | POST | `/admin/jobs/<id>/status` | `job_update_status` | State transition with machine validation; auto-SMS on `ready`, auto-coins on `picked_up` |
@@ -231,6 +235,7 @@ Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); staff auth route
 | POST | `/admin/parts/<id>/status` | `part_update_status` | Update part lifecycle status |
 | GET | `/admin/sms-log` | `sms_log` | Global SMS log (last 200) |
 | GET | `/admin/invoices` | `invoice_list` | All invoices |
+| GET | `/admin/invoices/export.csv` | `invoices_export_csv` | CSV export, admin only |
 | GET/POST | `/admin/jobs/<id>/invoice/new` | `invoice_new` | Create an invoice from a job, optionally applying coins |
 | GET | `/admin/invoices/<id>` | `invoice_detail` | Invoice detail |
 | POST | `/admin/invoices/<id>/mark-paid` | `invoice_mark_paid` | Mark invoice paid |

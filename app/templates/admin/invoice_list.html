@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Invoices — The Crucible{% endblock %}
 {% block content %}
-<h2>Invoices <span style="color:#999;font-weight:normal;font-size:.8em">({{ invoices|length }})</span></h2>
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <h2>Invoices <span style="color:#999;font-weight:normal;font-size:.8em">({{ invoices|length }})</span></h2>
+  {% if invoices %}
+  <a href="/admin/invoices/export.csv" class="btn btn-secondary">Export CSV</a>
+  {% endif %}
+</div>
 
 <div class="card">
   {% if invoices %}

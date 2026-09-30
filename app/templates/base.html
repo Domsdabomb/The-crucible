@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#1a1a2e">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
   <title>{% block title %}The Crucible{% endblock %}</title>
   <style>
     * { box-sizing: border-box; }
@@ -69,6 +72,15 @@
       input[type="text"], input[type="tel"], input[type="email"], input[type="password"],
       input[type="number"], input[type="date"], select, textarea { font-size: 16px; width: 100%; }
     }
+
+    /* ── Print: clean paper copies (invoices, job tickets) ── */
+    @media print {
+      nav, .btn, .flash-messages, .no-print { display: none !important; }
+      body { background: #fff; }
+      .container { max-width: none; margin: 0; padding: 0; }
+      .card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+      a { color: #000; text-decoration: none; }
+    }
   </style>
 </head>
 <body>
@@ -110,7 +122,7 @@
 </nav>
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
-  <div style="max-width:1200px;margin:.75rem auto;padding:0 1rem">
+  <div class="flash-messages" style="max-width:1200px;margin:.75rem auto;padding:0 1rem">
     {% for cat, msg in messages %}
     <div style="padding:.6rem 1rem;border-radius:4px;margin-bottom:.5rem;
       {% if cat == 'error' %}background:#f8d7da;color:#842029{% else %}background:#d1e7dd;color:#0f5132{% endif %}">

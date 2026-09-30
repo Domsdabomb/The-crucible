@@ -9,11 +9,14 @@ BC tax rates applied server-side:
     PST = 7%  of (labour + parts)
 """
 
+import csv
+import io
 import re
 import sqlite3
 from datetime import datetime, timezone
 
 from flask import (
+    Response,
     abort,
     flash,
     g,
@@ -208,25 +211,30 @@ def dashboard():
 # GET /admin/jobs  — Filterable job list
 # ─────────────────────────────────────────────────────────────────────────────
 
-@admin_bp.route("/jobs")
-@login_required
-def job_list():
-    db = get_db()
+def _job_filter_args():
+    """Parse the shared job-list filter query params into a tuple."""
+    return (
+        request.args.get("status"),
+        request.args.get("priority"),
+        request.args.get("tech_id", type=int),
+        request.args.get("date_from"),
+        request.args.get("date_to"),
+        request.args.get("search", "").strip(),
+    )
 
-    status    = request.args.get("status")
-    priority  = request.args.get("priority")
-    tech_id   = request.args.get("tech_id", type=int)
-    date_from = request.args.get("date_from")
-    date_to   = request.args.get("date_to")
-    search    = request.args.get("search", "").strip()
 
-    # Technicians only ever see their own jobs — override whatever was
-    # submitted rather than trusting the client. Fail closed (-1 matches
-    # no real technician) if a technician-role session somehow has no
-    # linked technician_id, instead of falling through to "no filter".
+def _scoped_tech_id(tech_id):
+    """Technicians only ever see their own jobs — override whatever was
+    submitted rather than trusting the client. Fail closed (-1 matches
+    no real technician) if a technician-role session somehow has no
+    linked technician_id, instead of falling through to "no filter"."""
     if session.get("admin_role") != "admin":
-        tech_id = session.get("admin_technician_id") or -1
+        return session.get("admin_technician_id") or -1
+    return tech_id
 
+
+def _job_filter_clause(status, priority, tech_id, date_from, date_to, search):
+    """Build the WHERE clause + params shared by the job list and CSV export."""
     conditions = []
     params: list = []
 
@@ -259,6 +267,19 @@ def job_list():
         params.extend([like, like, like, like, like, like])
 
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where_clause, params
+
+
+@admin_bp.route("/jobs")
+@login_required
+def job_list():
+    db = get_db()
+
+    status, priority, tech_id, date_from, date_to, search = _job_filter_args()
+    tech_id = _scoped_tech_id(tech_id)
+    where_clause, params = _job_filter_clause(
+        status, priority, tech_id, date_from, date_to, search
+    )
 
     priority_order = (
         "CASE rj.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 "
@@ -299,6 +320,78 @@ def job_list():
         },
         all_statuses=VALID_STATUSES,
         all_priorities=VALID_PRIORITIES,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /admin/jobs/export.csv  — CSV export (same filters/scoping as the list)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _csv_response(rows_iter, header, filename):
+    """Stream rows (iterables of values) as a downloadable CSV response."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    writer.writerows(rows_iter)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _dollars(cents):
+    return f"{(cents or 0) / 100:.2f}"
+
+
+@admin_bp.route("/jobs/export.csv")
+@login_required
+def jobs_export_csv():
+    db = get_db()
+
+    status, priority, tech_id, date_from, date_to, search = _job_filter_args()
+    tech_id = _scoped_tech_id(tech_id)
+    where_clause, params = _job_filter_clause(
+        status, priority, tech_id, date_from, date_to, search
+    )
+
+    rows = db.execute(
+        f"""
+        SELECT rj.id, rj.status, rj.priority, rj.created_at, rj.promised_date,
+               rj.labour_cents, rj.parts_cents, rj.gst_cents, rj.pst_cents,
+               rj.total_cents,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               d.make, d.model,
+               t.name  AS technician_name
+        FROM   repair_jobs rj
+        JOIN   customers   c ON c.id = rj.customer_id
+        JOIN   devices     d ON d.id = rj.device_id
+        LEFT JOIN technicians t ON t.id = rj.technician_id
+        {where_clause}
+        ORDER  BY rj.id
+        """,
+        params,
+    ).fetchall()
+
+    def data():
+        for r in rows:
+            yield [
+                r["id"], r["status"], r["priority"],
+                r["customer_name"], r["customer_phone"],
+                r["make"], r["model"], r["technician_name"] or "",
+                (r["created_at"] or "")[:10], r["promised_date"] or "",
+                _dollars(r["labour_cents"]), _dollars(r["parts_cents"]),
+                _dollars(r["gst_cents"]), _dollars(r["pst_cents"]),
+                _dollars(r["total_cents"]),
+            ]
+
+    filename = f"jobs-export-{datetime.now(timezone.utc):%Y%m%d}.csv"
+    return _csv_response(
+        data(),
+        ["job_id", "status", "priority", "customer_name", "customer_phone",
+         "device_make", "device_model", "technician", "created_at",
+         "promised_date", "labour", "parts", "gst", "pst", "total"],
+        filename,
     )
 
 
@@ -998,6 +1091,52 @@ def invoice_list():
     return render_template("admin/invoice_list.html", **ctx)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /admin/invoices/export.csv  — CSV export, admin only
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/invoices/export.csv")
+@admin_required
+def invoices_export_csv():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT i.id, i.status, i.created_at, i.paid_at,
+               i.labour_cents, i.parts_cents, i.gst_cents, i.pst_cents,
+               i.subtotal_cents, i.coins_applied, i.discount_cents,
+               i.amount_due_cents,
+               c.name  AS customer_name, c.phone AS customer_phone,
+               rj.id   AS job_id
+        FROM   invoices i
+        JOIN   customers   c  ON c.id  = i.customer_id
+        JOIN   repair_jobs rj ON rj.id = i.job_id
+        ORDER  BY i.id
+        """
+    ).fetchall()
+
+    def data():
+        for r in rows:
+            yield [
+                r["id"], r["status"],
+                r["customer_name"], r["customer_phone"], r["job_id"],
+                (r["created_at"] or "")[:10], (r["paid_at"] or "")[:10],
+                _dollars(r["labour_cents"]), _dollars(r["parts_cents"]),
+                _dollars(r["gst_cents"]), _dollars(r["pst_cents"]),
+                _dollars(r["subtotal_cents"]),
+                r["coins_applied"], _dollars(r["discount_cents"]),
+                _dollars(r["amount_due_cents"]),
+            ]
+
+    filename = f"invoices-export-{datetime.now(timezone.utc):%Y%m%d}.csv"
+    return _csv_response(
+        data(),
+        ["invoice_id", "status", "customer_name", "customer_phone", "job_id",
+         "created_at", "paid_at", "labour", "parts", "gst", "pst",
+         "subtotal", "coins_applied", "discount", "amount_due"],
+        filename,
+    )
+
+
 @admin_bp.route("/jobs/<int:job_id>/invoice/new", methods=["GET", "POST"])
 @admin_required
 def invoice_new(job_id: int):
@@ -1021,6 +1160,8 @@ def invoice_new(job_id: int):
 
     job = dict(job)
     wallet = get_or_create_wallet(db, job["customer_id"])
+    db.commit()  # persist wallet if just created — the INSERT opens an
+                 # implicit transaction that would break the BEGIN below
     subtotal = job["total_cents"]
     max_coins = calc_max_coins(subtotal, wallet["balance_coins"])
 
