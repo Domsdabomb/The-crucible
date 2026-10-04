@@ -40,10 +40,12 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app.auth import auth_bp
     from app.track import track_bp
     from app.portal import portal_bp
+    from app.api import api_bp
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(track_bp)
     app.register_blueprint(portal_bp)
+    app.register_blueprint(api_bp)
 
     # ── CSRF protection ──────────────────────────────────────────────────────
     # Every form POSTs a hidden csrf_token field; this checks it against the
@@ -52,6 +54,11 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.before_request
     def _csrf_protect():
+        # The JSON API (/api/v1/*) uses bearer-token auth instead of
+        # session cookies, so CSRF does not apply — tokens are never sent
+        # automatically by browsers.
+        if request.path.startswith("/api/"):
+            return
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             token = session.get("_csrf_token")
             # Form posts carry the token as a field; JSON API callers (this
@@ -62,7 +69,17 @@ def create_app(test_config: dict | None = None) -> Flask:
                 abort(400, "Invalid or missing CSRF token. Please refresh the page and try again.")
 
     # Convenience redirect: / → wherever this session belongs
-    from flask import redirect, url_for
+    from flask import redirect, url_for, jsonify
+
+    @app.errorhandler(404)
+    def _not_found(e):
+        # Blueprint error handlers don't fire for URLs that match no route
+        # at all, so unmatched /api/v1/* paths need an app-level handler
+        # to keep the JSON error shape.
+        if request.path.startswith("/api/"):
+            return jsonify({"error": {"code": "not_found",
+                                       "message": "Not found."}}), 404
+        return "<h1>Not Found</h1>", 404
 
     @app.route("/")
     def index():
