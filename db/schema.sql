@@ -247,3 +247,26 @@ CREATE TABLE IF NOT EXISTS admins (
     created_at      TEXT    NOT NULL
                     DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- ─────────────────────────────────────────────
+-- 12. API TOKENS  (mobile JSON API auth)
+-- ─────────────────────────────────────────────
+-- Opaque bearer tokens for /api/v1. Only the SHA-256 hash is stored;
+-- the raw token is shown to the caller once at issue time and never again.
+-- account_type distinguishes the two login systems (staff = admins table,
+-- customer = customers table); account_id is the row id in that table.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_type TEXT    NOT NULL
+                 CHECK (account_type IN ('staff', 'customer')),
+    account_id   INTEGER NOT NULL,
+    name         TEXT,                          -- optional device label
+    token_hash   TEXT    NOT NULL UNIQUE,       -- SHA-256 hex of the token
+    created_at   TEXT    NOT NULL
+                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_used_at TEXT,
+    revoked      INTEGER NOT NULL DEFAULT 0
+                 CHECK (revoked IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens (token_hash);
