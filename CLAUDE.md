@@ -17,6 +17,10 @@ the-crucible/
 ├── app/
 │   ├── __init__.py         # Flask app factory (create_app) — DB, blueprints, CSRF protection
 │   ├── db.py                # SQLite helpers: get_db, close_db, init_db, flask init-db CLI
+│   ├── api/
+│   │   ├── __init__.py     # Blueprint: api_bp, url_prefix="/api/v1" (mobile JSON API)
+│   │   ├── routes.py       # Token-auth endpoints: dashboard, jobs, invoices, customers, portal timeline
+│   │   └── tokens.py       # Opaque bearer tokens: issue/verify/revoke (SHA-256 hashed at rest)
 │   ├── admin/
 │   │   ├── __init__.py     # Blueprint: admin_bp, url_prefix="/admin"
 │   │   └── routes.py       # All admin routes (jobs, customers, technicians, parts, invoices, wallets, SMS log)
@@ -67,6 +71,7 @@ the-crucible/
 │   └── launch.json          # Claude Code preview: python run.py on port 5000
 ├── pytest.ini
 ├── requirements.txt         # flask, cryptography (Fernet), pytest
+├── API_CONTRACT.md          # Exact mobile API contract (v1) — the Flutter app builds against this
 └── .gitignore
 ```
 
@@ -103,6 +108,7 @@ The schema lives in `db/schema.sql` and is applied via `flask init-db` (or `init
 | `wallet_transactions` | Append-only ledger of coin credits/debits |
 | `invoices` | Snapshot of a job's pricing at invoice time, with coin discount applied |
 | `admins` | Login accounts for the admin panel |
+| `api_tokens` | Mobile API bearer tokens: account_type ('staff'\|'customer'), account_id, token_hash (SHA-256), revoked flag |
 
 **Key design decisions:**
 - **Phone is the customer upsert key** — `customers.phone` is UNIQUE; intake updates name/email if phone already exists.
@@ -244,6 +250,34 @@ Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); staff auth route
 | GET | `/admin/wallets` | `wallet_list` | All customer wallets by balance |
 | GET | `/admin/wallets/<customer_id>` | `wallet_detail` | Wallet + transaction ledger for a customer |
 | POST | `/admin/wallets/<customer_id>/adjust` | `wallet_adjust` | Manual credit/debit with a reason |
+
+### Mobile JSON API (v1)
+
+Token-authenticated JSON endpoints for the native mobile app live on the `api_bp` Blueprint (prefix `/api/v1`). The full contract — every endpoint, shape, and error code — is in `API_CONTRACT.md` at the repo root; treat that file as authoritative for client work.
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/health` | none | Liveness probe: `{"ok": true, "version": "1"}` |
+| POST | `/api/v1/auth/login` | none (rate-limited 10/min) | Staff (`username`) or customer (`phone`) login → opaque bearer token |
+| POST | `/api/v1/auth/logout` | token | Revokes the calling token |
+| GET | `/api/v1/dashboard` | staff, role=admin | Revenue summary + status counts + 10 recent jobs |
+| GET | `/api/v1/jobs` | staff (tech-scoped) | Paginated, filterable job list (status/priority/search/tech_id) |
+| POST | `/api/v1/jobs` | staff, role=admin | Intake: upsert customer → device → job, seeds history, fires intake SMS |
+| GET | `/api/v1/jobs/<id>` | staff (tech-scoped) | Full job + status history |
+| PATCH | `/api/v1/jobs/<id>` | staff (tech-scoped) | Update fields; `status` goes through the state machine (422 on illegal moves), writes `job_status_history`, recalcs tax on pricing edits |
+| GET | `/api/v1/invoices` | staff, role=admin | Paginated invoice list |
+| POST | `/api/v1/invoices` | staff, role=admin | Create invoice from a job (snapshots pricing, optional coin discount) |
+| GET | `/api/v1/invoices/<id>` | staff, role=admin | Invoice detail |
+| GET | `/api/v1/customers` | staff, role=admin | Paginated customer list (searchable) |
+| POST | `/api/v1/customers` | staff, role=admin | Create customer (phone unique → 409) |
+| GET | `/api/v1/customers/<id>` | staff, role=admin | Customer detail |
+| GET | `/api/v1/portal/timeline` | customer token only | Own jobs with full status history |
+
+**Token model** (`app/api/tokens.py`, table `api_tokens`): `secrets.token_urlsafe(32)` issued at login; only the SHA-256 hash is stored (`token_hash`, constant-time compared on verify). `account_type` is `'staff'` (→ `admins` row) or `'customer'` (→ `customers` row), mirroring the two separate web login systems; lockout behavior is reused from `app/services/auth.py` / `customer_auth.py`. `POST /api/v1/auth/logout` sets `revoked = 1`.
+
+**CSRF:** the app-wide `_csrf_protect` hook in `app/__init__.py` skips any path starting with `/api/` — bearer tokens are never sent automatically by browsers, so CSRF doesn't apply; the API relies on token auth instead.
+
+**Errors:** every API error returns `{"error": {"code": "<machine_code>", "message": "<human message>"}}` with codes like `validation_error`, `unauthorized`, `invalid_credentials`, `forbidden`, `not_found`, `conflict`, `invalid_transition`, `account_locked`, `rate_limited`.
 
 Root `/` redirects based on login state (defined in `app/__init__.py`).
 
