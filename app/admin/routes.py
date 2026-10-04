@@ -164,6 +164,25 @@ def dashboard():
         )
     }
 
+    # Revenue overview from invoices (integer cents; NULL → 0 when empty)
+    revenue = db.execute(
+        """
+        SELECT
+            SUM(CASE WHEN status = 'paid' THEN amount_due_cents ELSE 0 END)
+                AS collected_cents,
+            SUM(CASE WHEN status = 'paid'
+                          AND paid_at >= strftime('%Y-%m-01T00:00:00.000Z', 'now')
+                     THEN amount_due_cents ELSE 0 END)
+                AS month_cents,
+            SUM(CASE WHEN status = 'unpaid' THEN amount_due_cents ELSE 0 END)
+                AS outstanding_cents,
+            SUM(CASE WHEN status = 'unpaid' THEN 1 ELSE 0 END)
+                AS unpaid_count
+        FROM invoices
+        """
+    ).fetchone()
+    revenue_summary = {k: (revenue[k] or 0) for k in revenue.keys()}
+
     # Overdue: promised_date < today and not in a terminal/pickup state
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     overdue = db.execute(
@@ -200,6 +219,7 @@ def dashboard():
         "overdue":        [dict(r) for r in overdue],
         "active_feed":    [dict(r) for r in active_feed],
         "all_statuses":   VALID_STATUSES,
+        "revenue":        revenue_summary,
     }
 
     if _wants_json():
