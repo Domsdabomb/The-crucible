@@ -219,7 +219,8 @@ Admin routes are on the `admin_bp` Blueprint (prefix `/admin`); staff auth route
 | GET | `/portal/logout` | `logout` | Clears the customer session |
 | GET | `/portal/` | `dashboard` | Customer's own repair history + Crucible Coin balance |
 | GET/POST | `/portal/jobs/new` | `job_new` | Customer-submitted repair request, pinned to their own account |
-| GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority |
+| GET | `/portal/jobs/<id>` | `job_detail` | Customer's own repair timeline: status-change history as a vertical timeline; ownership-scoped, 404 for other customers' jobs |
+| GET | `/admin/` | `dashboard` | Pipeline counts, overdue jobs, active job feed sorted by priority, revenue overview (total collected, this month, outstanding, unpaid count) |
 | GET | `/admin/jobs` | `job_list` | Filterable list: status, priority, tech, date range, full-text search |
 | GET | `/admin/jobs/export.csv` | `jobs_export_csv` | CSV export honoring the list view's filters; technicians scoped to own jobs |
 | GET | `/admin/jobs/<id>` | `job_detail` | Full ticket: device, parts, status history, SMS log |

@@ -3,6 +3,26 @@
 {% block content %}
 <h2>Dashboard</h2>
 
+<h3 style="margin-bottom:.5rem">Revenue</h3>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;margin-bottom:1.5rem">
+  <div class="card" style="text-align:center;padding:.75rem">
+    <div style="font-size:1.6rem;font-weight:700;color:#198754">${{ "%.2f"|format(revenue.collected_cents/100) }}</div>
+    <div style="margin-top:.25rem;color:#666">Total collected</div>
+  </div>
+  <div class="card" style="text-align:center;padding:.75rem">
+    <div style="font-size:1.6rem;font-weight:700;color:#0d6efd">${{ "%.2f"|format(revenue.month_cents/100) }}</div>
+    <div style="margin-top:.25rem;color:#666">This month</div>
+  </div>
+  <div class="card" style="text-align:center;padding:.75rem">
+    <div style="font-size:1.6rem;font-weight:700;color:#dc3545">${{ "%.2f"|format(revenue.outstanding_cents/100) }}</div>
+    <div style="margin-top:.25rem;color:#666">Outstanding</div>
+  </div>
+  <div class="card" style="text-align:center;padding:.75rem">
+    <div style="font-size:1.6rem;font-weight:700">{{ revenue.unpaid_count }}</div>
+    <div style="margin-top:.25rem;color:#666">Unpaid invoices</div>
+  </div>
+</div>
+
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;margin-bottom:1.5rem">
   {% for status in all_statuses %}
   <div class="card" style="text-align:center;padding:.75rem">

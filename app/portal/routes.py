@@ -12,7 +12,7 @@ grant admin access and vice versa.
 import re
 from datetime import datetime, timezone
 
-from flask import flash, redirect, render_template, request, session, url_for
+from flask import abort, flash, redirect, render_template, request, session, url_for
 
 from app.db import get_db
 from app.services.crypto import encrypt_passcode
@@ -292,3 +292,45 @@ def job_new():
 
     flash("Repair request submitted! We'll be in touch shortly.", "success")
     return redirect(url_for("portal.dashboard"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /portal/jobs/<id>  — Customer repair timeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+@portal_bp.route("/jobs/<int:job_id>")
+@customer_login_required
+def job_detail(job_id: int):
+    """Customer-facing repair timeline: the job's own device/status info plus
+    a vertical timeline of every status change. Ownership-scoped — a customer
+    can only ever see their own jobs (404 otherwise)."""
+    db = get_db()
+    job = db.execute(
+        """
+        SELECT rj.id, rj.status, rj.priority, rj.description,
+               rj.promised_date, rj.created_at, rj.updated_at,
+               d.make, d.model
+        FROM   repair_jobs rj
+        JOIN   devices     d ON d.id = rj.device_id
+        WHERE  rj.id = ? AND rj.customer_id = ?
+        """,
+        (job_id, session["customer_id"]),
+    ).fetchone()
+    if job is None:
+        abort(404)
+
+    history = db.execute(
+        """
+        SELECT new_status, note, changed_at
+        FROM   job_status_history
+        WHERE  job_id = ?
+        ORDER  BY changed_at
+        """,
+        (job_id,),
+    ).fetchall()
+
+    return render_template(
+        "portal/job_detail.html",
+        job=dict(job),
+        history=[dict(h) for h in history],
+    )

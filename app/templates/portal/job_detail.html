@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Repair #{{ job.id }} — The Crucible{% endblock %}
+{% block content %}
+<style>
+.timeline { list-style:none; margin:1rem 0 0; padding:0 0 0 1.1rem; border-left:3px solid #dee2e6; }
+.timeline li { position:relative; padding:0 0 1.1rem .9rem; }
+.timeline li::before {
+  content:""; position:absolute; left:calc(-1.1rem - 8px); top:3px;
+  width:11px; height:11px; border-radius:50%;
+  background:#0d6efd; border:2px solid #fff; box-shadow:0 0 0 2px #0d6efd;
+}
+.timeline li.t-current::before { background:#198754; box-shadow:0 0 0 2px #198754; }
+.timeline .t-status { font-weight:700; font-size:1rem; }
+.timeline .t-time { color:#666; font-size:.85rem; margin-top:.15rem; }
+.timeline .t-note { color:#444; font-size:.9rem; margin-top:.15rem; }
+</style>
+
+<a href="{{ url_for('portal.dashboard') }}">&larr; My Repairs</a>
+
+<div class="card">
+  <h2 style="margin:0 0 .25rem">Ticket #{{ job.id }}</h2>
+  <p style="margin:.25rem 0">{{ job.make }} {{ job.model }}</p>
+  <p style="margin:.25rem 0">
+    <span class="badge badge-{{ job.status }}">{{ job.status.replace('_',' ') }}</span>
+    <span class="badge badge-{{ job.priority }}" style="margin-left:.4rem">{{ job.priority }}</span>
+  </p>
+  <p style="margin:.25rem 0;color:#666">Promised: {{ job.promised_date or '—' }} &nbsp;·&nbsp; Submitted: {{ job.created_at[:10] }}</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Repair Timeline</h3>
+  {% if history %}
+  <ul class="timeline">
+    {% for h in history %}
+    <li{% if loop.last %} class="t-current"{% endif %}>
+      <div class="t-status">
+        <span class="badge badge-{{ h.new_status }}">{{ h.new_status.replace('_',' ') }}</span>
+      </div>
+      <div class="t-time">{{ h.changed_at[:10] }}{% if h.changed_at|length > 10 %}, {{ h.changed_at[11:16] }}{% endif %}</div>
+      {% if h.note %}<div class="t-note">{{ h.note }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:#999;margin:0">No status updates yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

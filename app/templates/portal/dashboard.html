@@ -20,7 +20,7 @@
     <tbody>
     {% for j in jobs %}
     <tr>
-      <td>#{{ j.id }}</td>
+      <td><a href="{{ url_for('portal.job_detail', job_id=j.id) }}">#{{ j.id }}</a></td>
       <td>{{ j.make }} {{ j.model }}</td>
       <td><span class="badge badge-{{ j.status }}">{{ j.status.replace('_',' ') }}</span></td>
       <td>{{ j.promised_date or '—' }}</td>
