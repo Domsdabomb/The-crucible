@@ -27,6 +27,8 @@ jobs:
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             base64 -d android/app/src/main/res/mipmap-$d/ic_launcher.png.b64 > android/app/src/main/res/mipmap-$d/ic_launcher.png
           done
+          rm android/gradle/wrapper/gradle-wrapper.jar.b64
+          find android/app/src/main/res -name '*.b64' -delete
 
       - name: Analyze and build
         working-directory: mobile
